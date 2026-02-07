@@ -13,6 +13,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.48550/arXiv.1706.03762',
     source: 'seed',
+    githubRepo: 'tensorflow/tensor2tensor',
   },
   {
     id: 'devlin2019',
@@ -25,6 +26,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.48550/arXiv.1810.04805',
     source: 'seed',
+    githubRepo: 'google-research/bert',
   },
   {
     id: 'brown2020',
@@ -61,6 +63,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.1109/CVPR.2016.90',
     source: 'seed',
+    githubRepo: 'KaimingHe/deep-residual-networks',
   },
   {
     id: 'goodfellow2014',
@@ -73,6 +76,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.48550/arXiv.1406.2661',
     source: 'seed',
+    githubRepo: 'goodfeli/adversarial',
   },
   {
     id: 'krizhevsky2012',
@@ -133,6 +137,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.48550/arXiv.2103.00020',
     source: 'seed',
+    githubRepo: 'openai/CLIP',
   },
   {
     id: 'rombach2022',
@@ -145,6 +150,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.1109/CVPR52688.2022.10674',
     source: 'seed',
+    githubRepo: 'CompVis/stable-diffusion',
   },
   {
     id: 'ho2020',
@@ -157,6 +163,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.48550/arXiv.2006.11239',
     source: 'seed',
+    githubRepo: 'hojonathanho/diffusion',
   },
   {
     id: 'dosovitskiy2021',
@@ -169,6 +176,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.48550/arXiv.2010.11929',
     source: 'seed',
+    githubRepo: 'google-research/vision_transformer',
   },
   {
     id: 'silver2016',
@@ -181,6 +189,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.1038/nature16961',
     source: 'seed',
+    githubRepo: 'Rochester-NRT/AlphaGo',
   },
   {
     id: 'mnih2015',
@@ -193,6 +202,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.1038/nature14236',
     source: 'seed',
+    githubRepo: 'deepmind/dqn',
   },
   {
     id: 'schulman2017',
@@ -205,6 +215,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.48550/arXiv.1707.06347',
     source: 'seed',
+    githubRepo: 'openai/baselines',
   },
   {
     id: 'kipf2017',
@@ -217,6 +228,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.48550/arXiv.1609.02907',
     source: 'seed',
+    githubRepo: 'tkipf/gcn',
   },
   {
     id: 'hamilton2017',
@@ -265,6 +277,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.48550/arXiv.2302.13971',
     source: 'seed',
+    githubRepo: 'facebookresearch/llama',
   },
   {
     id: 'ouyang2022',
@@ -313,6 +326,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: null,
     source: 'seed',
+    githubRepo: 'openai/gpt-2',
   },
   {
     id: 'mikolov2013',
@@ -433,6 +447,7 @@ const SEED_PAPERS = [
     fieldsOfStudy: ['Computer Science'],
     doi: '10.48550/arXiv.1312.6114',
     source: 'seed',
+    githubRepo: 'dpkingma/vae_ssl',
   },
   {
     id: 'bahdanau2015',

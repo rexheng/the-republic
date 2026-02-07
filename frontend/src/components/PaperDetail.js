@@ -2,7 +2,7 @@ import React from 'react';
 import { GRAPH_COLORS } from '../config';
 import EvaluationDisplay from './EvaluationDisplay';
 
-function PaperDetail({ paper, onClose, onImport, evaluations }) {
+function PaperDetail({ paper, onClose, onImport, onMakeRunnable, onReplicate, evaluations }) {
   if (!paper) return null;
 
   const sourceLabel = paper.onChain ? 'On-Chain' : paper.source === 'seed' ? 'Seed Data' : 'Semantic Scholar';
@@ -103,6 +103,24 @@ function PaperDetail({ paper, onClose, onImport, evaluations }) {
           >
             View on Semantic Scholar
           </a>
+        )}
+
+        {paper.githubRepo && onMakeRunnable && (
+          <button
+            className="btn paper-detail-runnable"
+            onClick={() => onMakeRunnable(paper)}
+          >
+            &#128640; Make Runnable
+          </button>
+        )}
+
+        {onReplicate && (
+          <button
+            className="btn paper-detail-replicate"
+            onClick={() => onReplicate(paper)}
+          >
+            &#129514; Replicate
+          </button>
         )}
 
         {!paper.onChain && onImport && (

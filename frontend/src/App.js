@@ -7,6 +7,10 @@ import ReviewPanel from './components/ReviewPanel';
 import Stats from './components/Stats';
 import NetworkCheck from './components/NetworkCheck';
 import KnowledgeGraph from './components/KnowledgeGraph';
+import Paper2Agent from './components/Paper2Agent';
+import PredictionMarket from './components/PredictionMarket';
+import AIResearchLab from './components/AIResearchLab';
+import Vision from './components/Vision';
 import './App.css';
 
 function App() {
@@ -17,10 +21,22 @@ function App() {
   const [activeTab, setActiveTab] = useState('graph');
   const [loading, setLoading] = useState(false);
   const [importData, setImportData] = useState(null);
+  const [agentPaper, setAgentPaper] = useState(null);
+  const [labPaper, setLabPaper] = useState(null);
 
   const handleImportPaper = useCallback((paperData) => {
     setImportData(paperData);
     setActiveTab('submit');
+  }, []);
+
+  const handleMakeRunnable = useCallback((paper) => {
+    setAgentPaper(paper);
+    setActiveTab('agent');
+  }, []);
+
+  const handleReplicate = useCallback((paper) => {
+    setLabPaper(paper);
+    setActiveTab('lab');
   }, []);
 
   useEffect(() => {
@@ -63,7 +79,13 @@ function App() {
         signer
       );
 
-      setContracts({ researchGraph, usdc, researchToken });
+      const predictionMarket = new ethers.Contract(
+        CONTRACTS.PREDICTION_MARKET,
+        ABIS.PREDICTION_MARKET,
+        signer
+      );
+
+      setContracts({ researchGraph, usdc, researchToken, predictionMarket });
       setLoading(false);
     } catch (error) {
       console.error('Error connecting wallet:', error);
@@ -167,6 +189,12 @@ function App() {
             <>
               <div className="tabs">
                 <button
+                  className={`tab ${activeTab === 'vision' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('vision')}
+                >
+                  Vision
+                </button>
+                <button
                   className={`tab ${activeTab === 'graph' ? 'active' : ''}`}
                   onClick={() => setActiveTab('graph')}
                 >
@@ -191,16 +219,37 @@ function App() {
                   ✍️ Review
                 </button>
                 <button
+                  className={`tab ${activeTab === 'predict' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('predict')}
+                >
+                  Predict
+                </button>
+                <button
+                  className={`tab ${activeTab === 'agent' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('agent')}
+                >
+                  Paper2Agent
+                </button>
+                <button
+                  className={`tab ${activeTab === 'lab' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('lab')}
+                >
+                  AI Lab
+                </button>
+                <button
                   className={`tab ${activeTab === 'stats' ? 'active' : ''}`}
                   onClick={() => setActiveTab('stats')}
                 >
-                  📊 Stats
+                  Stats
                 </button>
               </div>
 
               <div className={`tab-content ${activeTab === 'graph' ? 'tab-content-graph' : ''}`}>
+                {activeTab === 'vision' && (
+                  <Vision />
+                )}
                 {activeTab === 'graph' && (
-                  <KnowledgeGraph contracts={contracts} account={account} onImportPaper={handleImportPaper} />
+                  <KnowledgeGraph contracts={contracts} account={account} onImportPaper={handleImportPaper} onMakeRunnable={handleMakeRunnable} onReplicate={handleReplicate} />
                 )}
                 {activeTab === 'papers' && (
                   <PaperList contracts={contracts} account={account} />
@@ -210,6 +259,15 @@ function App() {
                 )}
                 {activeTab === 'review' && (
                   <ReviewPanel contracts={contracts} account={account} />
+                )}
+                {activeTab === 'predict' && (
+                  <PredictionMarket contracts={contracts} account={account} />
+                )}
+                {activeTab === 'agent' && (
+                  <Paper2Agent agentPaper={agentPaper} />
+                )}
+                {activeTab === 'lab' && (
+                  <AIResearchLab labPaper={labPaper} />
                 )}
                 {activeTab === 'stats' && (
                   <Stats contracts={contracts} account={account} />

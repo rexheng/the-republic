@@ -21,8 +21,30 @@ function SubmitPaper({ contracts, account, importData }) {
       setMessage({ type: 'info', text: `Imported "${importData.title}" from Knowledge Graph. Fill in any missing details and submit.` });
     }
   }, [importData]);
+  const [pdfFile, setPdfFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+
+  const handlePdfSelect = (e) => {
+    const file = e.target.files[0];
+    if (file && file.type === 'application/pdf') {
+      setPdfFile(file);
+      // Generate mock IPFS hash from filename
+      const mockHash = 'Qm' + btoa(file.name).replace(/[^a-zA-Z0-9]/g, '').substring(0, 44);
+      setFormData(prev => ({ ...prev, ipfsHash: mockHash }));
+    }
+  };
+
+  const removePdf = () => {
+    setPdfFile(null);
+    setFormData(prev => ({ ...prev, ipfsHash: '' }));
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -104,6 +126,32 @@ function SubmitPaper({ contracts, account, importData }) {
       )}
 
       <form onSubmit={handleSubmit}>
+        {/* PDF Upload */}
+        {!pdfFile ? (
+          <label className="pdf-upload">
+            <input
+              type="file"
+              accept=".pdf"
+              onChange={handlePdfSelect}
+              style={{ display: 'none' }}
+            />
+            <div className="pdf-upload-icon">PDF</div>
+            <div className="pdf-upload-text">Click to attach your paper PDF</div>
+            <div className="pdf-upload-hint">Will be stored on IPFS (decentralized storage)</div>
+          </label>
+        ) : (
+          <div className="pdf-upload-info">
+            <span className="pdf-upload-info-icon">PDF</span>
+            <div>
+              <div className="pdf-upload-info-name">{pdfFile.name}</div>
+              <div className="pdf-upload-info-size">{formatFileSize(pdfFile.size)}</div>
+            </div>
+            <button type="button" className="pdf-upload-info-remove" onClick={removePdf}>
+              &times;
+            </button>
+          </div>
+        )}
+
         <div className="form-group">
           <label>Paper Title *</label>
           <input

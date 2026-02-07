@@ -1,11 +1,15 @@
 // Semantic Scholar API config
 export const SEMANTIC_SCHOLAR = {
   BASE_URL: 'https://api.semanticscholar.org/graph/v1',
+  RECOMMENDATIONS_URL: 'https://api.semanticscholar.org/recommendations/v1',
   PROXY_URL: 'https://api.allorigins.win/raw?url=',
-  FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds,references,citations',
-  SEARCH_FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds',
-  MAX_NODES: 300,
+  API_KEY: 'C2F3wqvKzQxQO7UrAhgr1X4oC5hA0Eq9uoCaPKNi',
+  FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds,references,citations,tldr,influentialCitationCount',
+  SEARCH_FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds,tldr,influentialCitationCount',
+  RECOMMENDATION_FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds,tldr,influentialCitationCount',
+  MAX_NODES: 5000,
   SEARCH_LIMIT: 20,
+  RATE_LIMIT_MS: 1050, // 1 req/sec + small buffer
 };
 
 export const GRAPH_COLORS = {
@@ -22,6 +26,7 @@ export const CONTRACTS = {
   RESEARCH_GRAPH: process.env.REACT_APP_RESEARCH_GRAPH || '0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82',
   RESEARCH_TOKEN: process.env.REACT_APP_RESEARCH_TOKEN || '0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0',
   USDC: process.env.REACT_APP_USDC || '0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e',
+  PREDICTION_MARKET: process.env.REACT_APP_PREDICTION_MARKET || '0x0000000000000000000000000000000000000000',
 };
 
 export const NETWORKS = {
@@ -64,5 +69,19 @@ export const ABIS = {
     'function balanceOf(address account) external view returns (uint256)',
     'function decimals() external view returns (uint8)',
     'function symbol() external view returns (string)',
+  ],
+  PREDICTION_MARKET: [
+    'function createMarket(uint256 paperId, string question, uint256 duration) external returns (uint256)',
+    'function stake(uint256 marketId, bool position, uint256 amount) external',
+    'function resolveMarket(uint256 marketId, bool outcome) external',
+    'function claimPayout(uint256 marketId) external',
+    'function getMarket(uint256 marketId) external view returns (tuple(uint256 id, uint256 paperId, address creator, string question, uint256 endTime, uint256 yesPool, uint256 noPool, bool resolved, bool outcome, uint256 totalParticipants))',
+    'function getUserStake(uint256 marketId, address user) external view returns (tuple(uint256 amount, bool position, bool claimed))',
+    'function calculatePayout(uint256 marketId, bool position, uint256 amount) external view returns (uint256)',
+    'function marketCount() external view returns (uint256)',
+    'event MarketCreated(uint256 indexed marketId, uint256 indexed paperId, string question, uint256 endTime)',
+    'event StakePlaced(uint256 indexed marketId, address indexed user, bool position, uint256 amount)',
+    'event MarketResolved(uint256 indexed marketId, bool outcome)',
+    'event PayoutClaimed(uint256 indexed marketId, address indexed user, uint256 amount)',
   ],
 };
