@@ -13,6 +13,13 @@ frontend/node_modules/
 frontend/build/
 frontend/.env.local
 
+# Backend
+backend/node_modules/
+backend/data/
+backend/submissions/
+backend/package-lock.json
+.npm-cache/
+
 # OS
 .DS_Store
 *.swp

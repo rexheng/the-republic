@@ -36,6 +36,16 @@ def download_competition_data(competition_name, data_dir):
     print(f"📥 Downloading data for competition: {competition_name}")
     print(f"📁 Target directory: {data_dir}")
 
+    # Skip download if CSV files already exist
+    existing_csvs = [f for f in os.listdir(data_dir) if f.endswith('.csv')] if os.path.exists(data_dir) else []
+    if existing_csvs:
+        print(f"✓ Data already exists ({len(existing_csvs)} CSV files found), skipping download:")
+        for f in existing_csvs:
+            file_path = os.path.join(data_dir, f)
+            size = os.path.getsize(file_path)
+            print(f"  - {f} ({size:,} bytes)")
+        return True
+
     try:
         # Download competition files
         cmd = ['kaggle', 'competitions', 'download', '-c', competition_name, '-p', data_dir]

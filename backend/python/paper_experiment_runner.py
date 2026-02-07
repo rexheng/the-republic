@@ -80,7 +80,7 @@ def basic_preprocess(train_df, test_df, target_col, frequency_encode=False):
 
     # Encode categoricals
     for col in X_train.columns:
-        if X_train[col].dtype == 'object':
+        if X_train[col].dtype == 'object' or X_train[col].dtype.name == 'string' or not pd.api.types.is_numeric_dtype(X_train[col]):
             if frequency_encode:
                 # Frequency encoding (mikolov2013 style)
                 freq = X_train[col].value_counts(normalize=True).to_dict()
