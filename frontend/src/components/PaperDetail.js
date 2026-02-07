@@ -1,7 +1,8 @@
 import React from 'react';
 import { GRAPH_COLORS } from '../config';
+import EvaluationDisplay from './EvaluationDisplay';
 
-function PaperDetail({ paper, onClose, onImport }) {
+function PaperDetail({ paper, onClose, onImport, evaluations }) {
   if (!paper) return null;
 
   const sourceLabel = paper.onChain ? 'On-Chain' : paper.source === 'seed' ? 'Seed Data' : 'Semantic Scholar';
@@ -83,6 +84,13 @@ function PaperDetail({ paper, onClose, onImport }) {
                 </a>
               </div>
             )}
+          </div>
+        )}
+
+        {evaluations && evaluations.length > 0 && (
+          <div className="paper-detail-eval">
+            <h3>Evaluation Summary</h3>
+            <EvaluationDisplay evaluations={evaluations} compact />
           </div>
         )}
 
