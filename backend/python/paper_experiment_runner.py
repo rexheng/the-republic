@@ -60,6 +60,11 @@ def basic_preprocess(train_df, test_df, target_col, frequency_encode=False):
     y_train = train_df[target_col]
     X_test = test_df.copy()
 
+    # Encode string targets (e.g., "Presence"/"Absence" → 1/0)
+    if not pd.api.types.is_numeric_dtype(y_train):
+        target_le = LabelEncoder()
+        y_train = pd.Series(target_le.fit_transform(y_train), name=y_train.name)
+
     id_col = find_id_column(X_test)
     test_ids = X_test[id_col].copy() if id_col else None
     if id_col:
@@ -304,25 +309,24 @@ def main():
         if paper_entry is None:
             continue
 
-        # Use frequency encoding for mikolov2013
-        use_freq = paper_id == 'mikolov2013'
-        X_train, y_train, X_test, test_ids, id_col = basic_preprocess(
-            train_df, test_df, target_col, frequency_encode=use_freq
-        )
-
-        experiment_info = build_experiment_pipeline(paper_entry, context)
-        pipeline = experiment_info['pipeline']
-
-        emit({
-            "event": "experiment_start",
-            "id": idx,
-            "paper_id": paper_id,
-            "paper_title": match['paper_title'],
-            "technique": match['technique'],
-            "strategy": experiment_info['description'],
-        })
-
         try:
+            # Use frequency encoding for mikolov2013
+            use_freq = paper_id == 'mikolov2013'
+            X_train, y_train, X_test, test_ids, id_col = basic_preprocess(
+                train_df, test_df, target_col, frequency_encode=use_freq
+            )
+
+            experiment_info = build_experiment_pipeline(paper_entry, context)
+            pipeline = experiment_info['pipeline']
+
+            emit({
+                "event": "experiment_start",
+                "id": idx,
+                "paper_id": paper_id,
+                "paper_title": match['paper_title'],
+                "technique": match['technique'],
+                "strategy": experiment_info['description'],
+            })
             extra_info = ""
 
             if paper_id == 'kipf2017':
@@ -387,8 +391,63 @@ def main():
             })
 
         except Exception as e:
-            emit({"event": "experiment_error", "id": idx, "paper_id": paper_id,
-                  "message": str(e)})
+            emit({"event": "log", "id": idx,
+                  "message": f"Primary pipeline failed: {str(e)[:120]}. Retrying with fallback..."})
+
+            # ─── Fallback: SimpleImputer + StandardScaler + GBM ───
+            try:
+                X_train, y_train, X_test, test_ids, id_col = basic_preprocess(
+                    train_df, test_df, target_col, frequency_encode=False
+                )
+                if problem_type == 'classification':
+                    fallback = Pipeline([
+                        ('imputer', SimpleImputer(strategy='median')),
+                        ('model', GradientBoostingClassifier(
+                            n_estimators=200, max_depth=4, random_state=42)),
+                    ])
+                else:
+                    fallback = Pipeline([
+                        ('imputer', SimpleImputer(strategy='median')),
+                        ('model', GradientBoostingRegressor(
+                            n_estimators=200, max_depth=4, random_state=42)),
+                    ])
+
+                cv_scores = cross_val_score(fallback, X_train, y_train, cv=5, scoring=scoring, n_jobs=-1)
+                mean_score = float(np.mean(cv_scores))
+                std_score = float(np.std(cv_scores))
+                fallback.fit(X_train, y_train)
+                preds = fallback.predict(X_test)
+
+                if baseline_score is None:
+                    baseline_score = mean_score
+
+                emit({"event": "log", "id": idx,
+                      "message": f"Fallback succeeded: CV={mean_score:.4f}"})
+                emit({
+                    "event": "experiment_result",
+                    "id": idx,
+                    "paper_id": paper_id,
+                    "technique": match['technique'] + " (fallback)",
+                    "cv_score": round(mean_score, 4),
+                    "std": round(std_score, 4),
+                    "features_used": X_train.shape[1],
+                    "model": match['technique'] + " (fallback)",
+                })
+
+                results.append({
+                    'id': idx,
+                    'paper_id': paper_id,
+                    'paper_title': match['paper_title'],
+                    'technique': match['technique'] + " (fallback)",
+                    'cv_score': mean_score,
+                    'std': std_score,
+                    'predictions': preds,
+                    'is_winner': False,
+                })
+
+            except Exception as e2:
+                emit({"event": "experiment_error", "id": idx, "paper_id": paper_id,
+                      "message": f"Both primary and fallback failed: {str(e2)[:120]}"})
             continue
 
     if not results:

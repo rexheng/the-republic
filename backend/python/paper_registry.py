@@ -64,7 +64,7 @@ def build_dataset_context(analysis):
     target_info = cols_info.get(target_col, {})
     unique = target_info.get('unique', 0)
     dtype = target_info.get('dtype', '')
-    if unique <= 20 and dtype in ['int64', 'object', 'bool']:
+    if unique <= 20 and (dtype in ['int64', 'object', 'bool', 'str', 'string', 'category'] or 'str' in dtype):
         problem_type = 'classification'
     else:
         problem_type = 'regression'
