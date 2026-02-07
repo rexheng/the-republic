@@ -11,6 +11,7 @@ import Paper2Agent from './components/Paper2Agent';
 import PredictionMarket from './components/PredictionMarket';
 import AIResearchLab from './components/AIResearchLab';
 import Vision from './components/Vision';
+import KaggleLab from './components/KaggleLab';
 import './App.css';
 
 function App() {
@@ -237,6 +238,12 @@ function App() {
                   AI Lab
                 </button>
                 <button
+                  className={`tab ${activeTab === 'kaggle' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('kaggle')}
+                >
+                  🏆 Kaggle Lab
+                </button>
+                <button
                   className={`tab ${activeTab === 'stats' ? 'active' : ''}`}
                   onClick={() => setActiveTab('stats')}
                 >
@@ -268,6 +275,9 @@ function App() {
                 )}
                 {activeTab === 'lab' && (
                   <AIResearchLab labPaper={labPaper} />
+                )}
+                {activeTab === 'kaggle' && (
+                  <KaggleLab />
                 )}
                 {activeTab === 'stats' && (
                   <Stats contracts={contracts} account={account} />
