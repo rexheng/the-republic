@@ -15,7 +15,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { FadeIn } from '@/components/ui/fade-in';
-import { Search, Plus, X, Upload, FlaskConical, Telescope, ChevronRight, FileText, Puzzle } from 'lucide-react';
+import { Search, Plus, X, Upload, FlaskConical, Telescope, ChevronRight, FileText, Puzzle, Network, Loader2, ExternalLink } from 'lucide-react';
+import { searchPapers } from '../utils/semanticScholar';
 
 const CUSTOM_PAPERS_KEY = 'lab-custom-papers';
 
@@ -67,6 +68,9 @@ function AIResearchLab({ labPaper }) {
   const [formYear, setFormYear] = useState('');
   const [formAbstract, setFormAbstract] = useState('');
   const [formFields, setFormFields] = useState('');
+  const [showConnections, setShowConnections] = useState(false);
+  const [connectedPapers, setConnectedPapers] = useState([]);
+  const [loadingConnections, setLoadingConnections] = useState(false);
   const pipelineRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -78,6 +82,25 @@ function AIResearchLab({ labPaper }) {
   useEffect(() => {
     const { apiKey } = getLLMConfig();
     setHasApiKey(!!apiKey);
+  }, []);
+
+  // Fetch knowledge graph connections for selected paper
+  const fetchConnections = useCallback(async (paper) => {
+    if (!paper?.title) return;
+    setLoadingConnections(true);
+    setShowConnections(true);
+    try {
+      // Search S2 for papers related to this one
+      const terms = paper.title.split(/\s+/).filter(w => w.length > 3).slice(0, 5).join(' ');
+      const results = await searchPapers(terms, 8);
+      // Filter out the selected paper itself
+      const filtered = results.filter(r => r.title?.toLowerCase() !== paper.title?.toLowerCase());
+      setConnectedPapers(filtered);
+    } catch (err) {
+      console.error('Connection fetch failed:', err);
+      setConnectedPapers([]);
+    }
+    setLoadingConnections(false);
   }, []);
 
   // Handle incoming paper from PaperDetail "Replicate" button
@@ -562,6 +585,21 @@ function AIResearchLab({ labPaper }) {
                   </>
                 )}
               </div>
+              {/* Graph Connections Button */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="font-mono text-[10px] uppercase tracking-widest rounded-none"
+                onClick={() => {
+                  const p = mode === 'discover' ? selectedPapers[0] : selectedPaper;
+                  if (showConnections) { setShowConnections(false); }
+                  else { fetchConnections(p); }
+                }}
+              >
+                <Network className="h-3.5 w-3.5 mr-1.5" />
+                {showConnections ? 'Hide Connections' : 'Graph Connections'}
+              </Button>
+
               {!hasApiKey ? (
                 <Alert variant="warning" className="max-w-xs">
                   <AlertDescription>
@@ -626,6 +664,53 @@ function AIResearchLab({ labPaper }) {
                 })}
               </div>
             </div>
+
+            {/* Graph connections panel */}
+            {showConnections && (
+              <div className="mb-6 border border-neutral-200 bg-neutral-50 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Network className="h-4 w-4 text-neutral-500" />
+                  <span className="font-mono text-[10px] uppercase tracking-widest font-bold text-neutral-500">
+                    Knowledge Graph — Connected Papers
+                  </span>
+                </div>
+                {loadingConnections && (
+                  <div className="flex items-center gap-2 text-neutral-400 text-xs py-4">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Searching Semantic Scholar for connected research...
+                  </div>
+                )}
+                {!loadingConnections && connectedPapers.length === 0 && (
+                  <div className="text-neutral-400 text-xs italic py-2">No connected papers found.</div>
+                )}
+                {!loadingConnections && connectedPapers.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {connectedPapers.map((paper, j) => (
+                      <a
+                        key={paper.paperId || j}
+                        href={`https://www.semanticscholar.org/paper/${paper.paperId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex flex-col gap-1 p-3 bg-white border border-neutral-100 hover:border-neutral-400 transition-colors"
+                      >
+                        <div className="text-sm font-medium text-neutral-800 line-clamp-2 leading-snug">{paper.title}</div>
+                        <div className="text-[10px] text-neutral-400 font-mono">
+                          {paper.authors?.slice(0, 2).map(a => typeof a === 'string' ? a : a.name).join(', ')}
+                          {paper.authors?.length > 2 ? ' et al.' : ''} ({paper.year})
+                        </div>
+                        <div className="flex items-center gap-3 mt-1">
+                          <span className="text-[9px] font-mono text-neutral-400">{(paper.citationCount || 0).toLocaleString()} citations</span>
+                          {paper.fieldsOfStudy?.[0] && (
+                            <Badge variant="outline" className="text-[8px] font-mono">{paper.fieldsOfStudy[0]}</Badge>
+                          )}
+                          <ExternalLink className="h-3 w-3 text-neutral-300 ml-auto" />
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Agent cards */}
             <div className="space-y-3">

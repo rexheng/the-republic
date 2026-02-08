@@ -620,10 +620,34 @@ function FormalOutput({ data }) {
 }
 
 function RawOutput({ data }) {
+  // Format the raw text nicely instead of showing an error
+  const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  // Split into paragraphs and render with basic formatting
+  const paragraphs = text.split(/\n\n+/).filter(Boolean);
   return (
-    <div className="space-y-2">
-      <p className="text-sm text-amber-600">Could not parse structured output. Raw response:</p>
-      <pre className="bg-neutral-50 border border-neutral-200 p-3 text-xs font-mono overflow-x-auto"><code>{data}</code></pre>
+    <div className="space-y-3">
+      {paragraphs.map((para, i) => {
+        const trimmed = para.trim();
+        // Detect headings (lines starting with # or ALL CAPS short lines)
+        if (trimmed.startsWith('#')) {
+          return <h4 key={i} className="font-mono text-xs font-bold uppercase tracking-widest text-neutral-500 mt-3">{trimmed.replace(/^#+\s*/, '')}</h4>;
+        }
+        // Detect bullet points
+        if (trimmed.includes('\n-') || trimmed.startsWith('-') || trimmed.startsWith('*')) {
+          const lines = trimmed.split('\n');
+          return (
+            <ul key={i} className="space-y-1 ml-2">
+              {lines.map((line, j) => (
+                <li key={j} className="text-sm text-neutral-700 leading-relaxed flex gap-2">
+                  {(line.startsWith('-') || line.startsWith('*')) && <span className="text-neutral-400 flex-shrink-0">-</span>}
+                  <span>{line.replace(/^[-*]\s*/, '')}</span>
+                </li>
+              ))}
+            </ul>
+          );
+        }
+        return <p key={i} className="text-sm text-neutral-700 leading-relaxed">{trimmed}</p>;
+      })}
     </div>
   );
 }

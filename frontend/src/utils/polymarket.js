@@ -25,11 +25,21 @@ export async function fetchPolymarketEvents({ limit = 20, scienceOnly = false } 
   try {
     // Fetch more than needed so we can filter
     const fetchLimit = scienceOnly ? 200 : limit;
-    const res = await fetch(
-      `${GAMMA_API}/events?closed=false&limit=${fetchLimit}&order=liquidityNum&ascending=false`
-    );
-    if (!res.ok) throw new Error(`Gamma API ${res.status}`);
-    const events = await res.json();
+    const directUrl = `${GAMMA_API}/events?closed=false&limit=${fetchLimit}&order=liquidityNum&ascending=false`;
+
+    let events;
+    try {
+      // Try direct fetch first
+      const res = await fetch(directUrl);
+      if (!res.ok) throw new Error(`${res.status}`);
+      events = await res.json();
+    } catch {
+      // CORS fallback via proxy
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`;
+      const res = await fetch(proxyUrl);
+      if (!res.ok) throw new Error(`Proxy ${res.status}`);
+      events = await res.json();
+    }
 
     let filtered = events;
     if (scienceOnly) {
