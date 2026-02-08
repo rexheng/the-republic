@@ -26,20 +26,77 @@ function lmsrCost(yesShares, noShares, b, shares, isYes) {
 }
 
 // ─── Extract search keywords from a market question ───────────────
+const STOP_WORDS = new Set([
+  'will', 'the', 'be', 'by', 'in', 'of', 'to', 'a', 'an', 'and', 'or',
+  'is', 'are', 'was', 'were', 'has', 'have', 'had', 'do', 'does', 'did',
+  'for', 'on', 'at', 'from', 'with', 'as', 'this', 'that', 'it', 'its',
+  'than', 'more', 'most', 'can', 'could', 'should', 'would', 'may', 'might',
+  'up', 'down', 'before', 'after', 'about', 'over', 'under', 'between',
+  'through', 'during', 'into', 'out', 'what', 'which', 'who', 'whom',
+  'how', 'when', 'where', 'why', 'not', 'no', 'yes', 'if', 'then',
+]);
+
+function extractKeywords(text) {
+  return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/)
+    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+}
+
 function extractSearchTerms(question) {
-  const stopWords = new Set([
-    'will', 'the', 'be', 'by', 'in', 'of', 'to', 'a', 'an', 'and', 'or',
-    'is', 'are', 'was', 'were', 'has', 'have', 'had', 'do', 'does', 'did',
-    'for', 'on', 'at', 'from', 'with', 'as', 'this', 'that', 'it', 'its',
-    'than', 'more', 'most', 'can', 'could', 'should', 'would', 'may', 'might',
-    'up', 'down', 'before', 'after', 'about', 'over', 'under', 'between',
-    'through', 'during', 'into', 'out', 'what', 'which', 'who', 'whom',
-    'how', 'when', 'where', 'why', 'not', 'no', 'yes', 'if', 'then',
-  ]);
-  const words = question.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/);
-  const keywords = words.filter(w => w.length > 2 && !stopWords.has(w));
-  // Take the most distinctive 3-4 keywords
-  return keywords.slice(0, 4).join(' ');
+  return extractKeywords(question).slice(0, 4).join(' ');
+}
+
+// ─── Score and rank papers by relevance to a market question ──────
+function scoreAndRankPapers(papers, question) {
+  const qKeywords = extractKeywords(question);
+  if (qKeywords.length === 0) return papers.map(p => ({ ...p, relevance: 0, relevanceTag: '' }));
+
+  const scored = papers.map(paper => {
+    let score = 0;
+    const titleKeywords = extractKeywords(paper.title);
+    const abstractKeywords = extractKeywords(paper.abstract || paper.tldr?.text || '');
+
+    // Title match (3x weight)
+    for (const qk of qKeywords) {
+      for (const tk of titleKeywords) {
+        if (tk === qk) score += 3;
+        else if (tk.includes(qk) || qk.includes(tk)) score += 1.5;
+      }
+    }
+
+    // Abstract match (1x weight)
+    for (const qk of qKeywords) {
+      for (const ak of abstractKeywords) {
+        if (ak === qk) score += 1;
+        else if (ak.includes(qk) || qk.includes(ak)) score += 0.3;
+      }
+    }
+
+    // Citation impact bonus (log scale, capped)
+    score += Math.min(Math.log10((paper.citationCount || 0) + 1) * 0.5, 3);
+
+    // Recency bonus (papers from last 3 years get a boost)
+    if (paper.year && paper.year >= new Date().getFullYear() - 3) score += 1;
+
+    // Determine relevance tag
+    let relevanceTag = '';
+    const titleHits = qKeywords.filter(qk => titleKeywords.some(tk => tk.includes(qk) || qk.includes(tk)));
+    if (titleHits.length >= 2) relevanceTag = 'Direct match';
+    else if (titleHits.length === 1) relevanceTag = 'Title overlap';
+    else if (score > 2) relevanceTag = 'Related concepts';
+    else relevanceTag = 'Background';
+
+    return { ...paper, _score: score, relevanceTag };
+  });
+
+  // Sort by score descending
+  scored.sort((a, b) => b._score - a._score);
+
+  // Normalize to 0-100 relevance
+  const maxScore = scored[0]?._score || 1;
+  return scored.map(p => ({
+    ...p,
+    relevance: Math.round((p._score / maxScore) * 100),
+  }));
 }
 
 // ─── Demo data (on-chain LMSR markets) ────────────────────────────
@@ -83,14 +140,15 @@ function PredictionMarket({ contracts, account }) {
     }
   }, [source, polymarketEvents.length]);
 
-  // Search for relevant academic papers for a market question
+  // Search for relevant academic papers for a market question, then rank by relevance
   const findRelatedPapers = useCallback(async (marketId, question) => {
     if (paperResults[marketId] || loadingPapers[marketId]) return;
     setLoadingPapers(prev => ({ ...prev, [marketId]: true }));
     try {
       const terms = extractSearchTerms(question);
-      const results = await searchPapers(terms, 5);
-      setPaperResults(prev => ({ ...prev, [marketId]: results }));
+      const results = await searchPapers(terms, 8);
+      const ranked = scoreAndRankPapers(results, question).slice(0, 5);
+      setPaperResults(prev => ({ ...prev, [marketId]: ranked }));
     } catch (err) {
       console.error('Paper search failed:', err);
       setPaperResults(prev => ({ ...prev, [marketId]: [] }));
@@ -218,38 +276,72 @@ function PredictionMarket({ contracts, account }) {
                     <div className="text-neutral-400 text-xs italic py-2">No closely related papers found.</div>
                   )}
 
-                  {papers && papers.map((paper, j) => (
-                    <div key={paper.paperId || j} className="flex flex-col gap-1 border-b border-neutral-100 pb-2 last:border-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <a
-                            href={`https://www.semanticscholar.org/paper/${paper.paperId}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm font-medium text-neutral-800 hover:text-blue-600 transition-colors line-clamp-2"
-                          >
-                            {paper.title}
-                          </a>
-                          <div className="text-[10px] text-neutral-400 font-mono mt-0.5">
-                            {paper.authors?.slice(0, 3).map(a => typeof a === 'string' ? a : a.name).join(', ')}
-                            {paper.authors?.length > 3 ? ' et al.' : ''} ({paper.year})
-                          </div>
-                        </div>
-                        <Badge variant="outline" className="text-[8px] font-mono flex-shrink-0">
-                          {(paper.citationCount || 0).toLocaleString()} cites
-                        </Badge>
-                      </div>
-                      {paper.tldr?.text && (
-                        <p className="text-[11px] text-neutral-500 italic line-clamp-2">{paper.tldr.text}</p>
-                      )}
-                    </div>
-                  ))}
+                  {papers && papers.map((paper, j) => renderPaperCard(paper, j))}
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
       </FadeIn>
+    );
+  };
+
+  // Shared paper card with relevance bar
+  const renderPaperCard = (paper, j) => {
+    const relevance = paper.relevance || 0;
+    const tag = paper.relevanceTag || '';
+    return (
+      <div key={paper.paperId || j} className="flex flex-col gap-1.5 border-b border-neutral-100 pb-3 last:border-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <a
+              href={`https://www.semanticscholar.org/paper/${paper.paperId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-medium text-neutral-800 hover:text-blue-600 transition-colors line-clamp-2"
+            >
+              {paper.title}
+            </a>
+            <div className="text-[10px] text-neutral-400 font-mono mt-0.5">
+              {paper.authors?.slice(0, 3).map(a => typeof a === 'string' ? a : a.name).join(', ')}
+              {paper.authors?.length > 3 ? ' et al.' : ''} ({paper.year})
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+            <Badge variant="outline" className="text-[8px] font-mono">
+              {(paper.citationCount || 0).toLocaleString()} cites
+            </Badge>
+            {tag && (
+              <span className={`text-[8px] font-mono px-1.5 py-0.5 ${
+                tag === 'Direct match' ? 'bg-green-50 text-green-700' :
+                tag === 'Title overlap' ? 'bg-blue-50 text-blue-600' :
+                tag === 'Related concepts' ? 'bg-amber-50 text-amber-700' :
+                'bg-neutral-100 text-neutral-500'
+              }`}>
+                {tag}
+              </span>
+            )}
+          </div>
+        </div>
+        {/* Relevance bar */}
+        {relevance > 0 && (
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-1 bg-neutral-100 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${relevance}%`,
+                  background: relevance > 70 ? '#16a34a' : relevance > 40 ? '#ca8a04' : '#9ca3af',
+                }}
+              />
+            </div>
+            <span className="text-[9px] font-mono text-neutral-400 w-7 text-right">{relevance}%</span>
+          </div>
+        )}
+        {paper.tldr?.text && (
+          <p className="text-[11px] text-neutral-500 italic line-clamp-2">{paper.tldr.text}</p>
+        )}
+      </div>
     );
   };
 
