@@ -81,7 +81,10 @@ export async function callClaude(apiKey, model, systemPrompt, chatMessages, apiU
 
   const data = await response.json();
   const textBlock = data.content?.find(b => b.type === 'text');
-  return textBlock?.text || 'No response received.';
+  if (!textBlock?.text) {
+    throw new Error('Claude returned empty response. Try rephrasing your question.');
+  }
+  return textBlock.text;
 }
 
 export async function callOpenAI(apiKey, model, systemPrompt, chatMessages, apiUrl, options = {}) {
@@ -119,7 +122,11 @@ export async function callOpenAI(apiKey, model, systemPrompt, chatMessages, apiU
   }
 
   const data = await response.json();
-  return data.choices?.[0]?.message?.content || 'No response received.';
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error('API returned empty response. Try rephrasing your question.');
+  }
+  return content;
 }
 
 export async function callLLM(systemPrompt, userMessages, options = {}) {

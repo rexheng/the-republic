@@ -272,6 +272,9 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
 
       const { text: cleanContent, actions, citedNumbers } = parseResponse(rawContent);
 
+      // Fallback: if parsing stripped everything, use raw content
+      const finalContent = cleanContent || rawContent.replace(/\[(?:HIGHLIGHT|ZOOM|PATH|SEARCH):[^\]]*\]/g, '').trim() || 'I found relevant papers but could not generate a summary. See the papers below.';
+
       // Handle search actions
       for (const action of actions) {
         if (action.type === 'search' && onAddPapers) {
@@ -290,18 +293,23 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
         }
       }
 
-      // Only include papers that were actually cited
-      const citedPapers = citedNumbers
-        .map(n => contextPapers[n - 1])
-        .filter(Boolean);
+      // Papers: show cited ones first, fall back to top context papers
+      let citedPapers = citedNumbers.map(n => contextPapers[n - 1]).filter(Boolean);
+      let finalCitedNumbers = citedNumbers.filter((n) => contextPapers[n - 1]);
+
+      // If LLM didn't cite any papers, show top 3 context papers as references
+      if (citedPapers.length === 0 && contextPapers.length > 0) {
+        citedPapers = contextPapers.slice(0, 3);
+        finalCitedNumbers = citedPapers.map((_, i) => i + 1);
+      }
 
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: cleanContent,
+        content: finalContent,
         actions,
-        papers: contextPapers.slice(0, 15), // all context papers for citation lookup
+        papers: contextPapers.slice(0, 15),
         citedPapers,
-        citedNumbers,
+        citedNumbers: finalCitedNumbers,
       }]);
     } catch (err) {
       setMessages(prev => [...prev, {
