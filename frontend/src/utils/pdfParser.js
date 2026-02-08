@@ -21,10 +21,14 @@ async function parseWithGrobid(file) {
   formData.append('input', file);
   formData.append('consolidateHeader', '1');
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
   const res = await fetch(GROBID_URL, {
     method: 'POST',
     body: formData,
+    signal: controller.signal,
   });
+  clearTimeout(timeout);
 
   if (!res.ok) throw new Error(`Grobid returned ${res.status}`);
 

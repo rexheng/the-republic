@@ -6,7 +6,7 @@ export const SEMANTIC_SCHOLAR = {
   BASE_URL: 'https://api.semanticscholar.org/graph/v1',
   RECOMMENDATIONS_URL: 'https://api.semanticscholar.org/recommendations/v1',
   PROXY_URL: 'https://api.allorigins.win/raw?url=',
-  API_KEY: 'C2F3wqvKzQxQO7UrAhgr1X4oC5hA0Eq9uoCaPKNi',
+  API_KEY: import.meta.env.VITE_S2_API_KEY || '',
   FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds,references,citations,tldr,influentialCitationCount',
   SEARCH_FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds,tldr,influentialCitationCount',
   RECOMMENDATION_FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds,tldr,influentialCitationCount',
