@@ -77,7 +77,7 @@ function PredictionMarket({ contracts, account }) {
   useEffect(() => {
     if (source === 'polymarket' && polymarketEvents.length === 0) {
       setLoadingPoly(true);
-      fetchPolymarketEvents({ limit: 30, scienceOnly: false })
+      fetchPolymarketEvents({ limit: 10 })
         .then(events => setPolymarketEvents(events))
         .finally(() => setLoadingPoly(false));
     }
@@ -515,9 +515,41 @@ function PredictionMarket({ contracts, account }) {
           {source === 'republic' && filteredMarkets.map((market, i) => renderRepublicCard(market, i))}
 
           {source === 'polymarket' && loadingPoly && (
-            <div className="flex items-center justify-center gap-3 py-16 text-neutral-400">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              <span className="font-mono text-xs uppercase tracking-widest">Fetching live Polymarket events...</span>
+            <div className="flex flex-col items-center justify-center py-16 gap-4">
+              <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
+              <span className="font-mono text-xs uppercase tracking-widest text-neutral-400">Fetching live Polymarket events...</span>
+              <div className="w-64 h-1 bg-neutral-100 overflow-hidden">
+                <div className="h-full bg-purple-500 animate-pulse" style={{
+                  animation: 'loading-bar 2s ease-in-out infinite',
+                  width: '100%',
+                  transformOrigin: 'left',
+                }} />
+              </div>
+              <style>{`
+                @keyframes loading-bar {
+                  0% { transform: scaleX(0); transform-origin: left; }
+                  50% { transform: scaleX(1); transform-origin: left; }
+                  51% { transform: scaleX(1); transform-origin: right; }
+                  100% { transform: scaleX(0); transform-origin: right; }
+                }
+              `}</style>
+            </div>
+          )}
+
+          {source === 'polymarket' && !loadingPoly && polymarketEvents.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-neutral-400">
+              <span className="font-mono text-xs uppercase tracking-widest">No events loaded</span>
+              <button
+                className="px-4 py-2 border border-purple-300 text-purple-600 font-mono text-[10px] uppercase tracking-widest hover:bg-purple-50 transition-all"
+                onClick={() => {
+                  setLoadingPoly(true);
+                  fetchPolymarketEvents({ limit: 10 })
+                    .then(events => setPolymarketEvents(events))
+                    .finally(() => setLoadingPoly(false));
+                }}
+              >
+                Retry
+              </button>
             </div>
           )}
 

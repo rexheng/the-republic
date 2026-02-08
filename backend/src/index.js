@@ -71,6 +71,21 @@ app.use('/api/blockchain', blockchainRoutes(blockchain));
 app.use('/api/swarm', swarmRoutes(swarm, wss));
 app.use('/api/republic', republicRoutes(republic, wss));
 
+// ——— Polymarket proxy (avoids CORS in browser) ———
+app.get('/api/polymarket/events', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const url = `https://gamma-api.polymarket.com/events?closed=false&active=true&limit=${limit}&order=volume24hr&ascending=false`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Gamma API ${response.status}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error('Polymarket proxy error:', err.message);
+    res.status(502).json({ error: 'Failed to fetch from Polymarket' });
+  }
+});
+
 // ——— Existing Kaggle pipeline routes ———
 
 const activeSessions = new Map();

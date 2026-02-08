@@ -1,71 +1,62 @@
-// Polymarket Gamma API integration
-const GAMMA_API = 'https://gamma-api.polymarket.com';
+// Polymarket integration via backend proxy
+const BACKEND = 'http://localhost:3001';
 const POLYMARKET_BASE = 'https://polymarket.com/event';
 
-// Science/AI/tech related keywords to filter interesting markets
-const SCIENCE_KEYWORDS = [
-  'ai', 'artificial intelligence', 'gpt', 'openai', 'google', 'deepmind',
-  'climate', 'nasa', 'space', 'mars', 'moon', 'quantum', 'fusion',
-  'vaccine', 'fda', 'drug', 'disease', 'pandemic', 'virus',
-  'nobel', 'research', 'study', 'science', 'technology', 'tech',
-  'brain', 'neuralink', 'gene', 'crispr', 'protein',
-  'agi', 'model', 'llm', 'chatgpt', 'claude', 'gemini', 'anthropic',
-  'bitcoin', 'ethereum', 'crypto', 'blockchain',
-  'nuclear', 'energy', 'solar', 'battery',
-  'self-driving', 'autonomous', 'robot',
-];
-
-function matchesScience(text) {
-  if (!text) return false;
-  const lower = text.toLowerCase();
-  return SCIENCE_KEYWORDS.some(kw => lower.includes(kw));
+// Parse a JSON string field that might already be an array
+function parseJsonField(raw, fallback = []) {
+  if (!raw) return fallback;
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch { return fallback; }
+  }
+  return fallback;
 }
 
-export async function fetchPolymarketEvents({ limit = 20, scienceOnly = false } = {}) {
+export async function fetchPolymarketEvents({ limit = 30 } = {}) {
   try {
-    // Fetch more than needed so we can filter
-    const fetchLimit = scienceOnly ? 200 : limit;
-    const directUrl = `${GAMMA_API}/events?closed=false&limit=${fetchLimit}&order=liquidityNum&ascending=false`;
+    const res = await fetch(`${BACKEND}/api/polymarket/events?limit=${limit}`);
+    if (!res.ok) throw new Error(`Backend ${res.status}`);
+    const events = await res.json();
 
-    let events;
-    try {
-      // Try direct fetch first
-      const res = await fetch(directUrl);
-      if (!res.ok) throw new Error(`${res.status}`);
-      events = await res.json();
-    } catch {
-      // CORS fallback via proxy
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`;
-      const res = await fetch(proxyUrl);
-      if (!res.ok) throw new Error(`Proxy ${res.status}`);
-      events = await res.json();
+    if (!Array.isArray(events)) {
+      console.error('Polymarket: unexpected response', events);
+      return [];
     }
 
-    let filtered = events;
-    if (scienceOnly) {
-      filtered = events.filter(e =>
-        matchesScience(e.title) || matchesScience(e.description)
-      );
-    }
+    return events.slice(0, limit).map(event => {
+      const market = event.markets?.[0];
+      let outcomes = ['Yes', 'No'];
+      let outcomePrices = [0.5, 0.5];
 
-    return filtered.slice(0, limit).map(event => ({
-      id: `poly_${event.id}`,
-      polymarketId: event.id,
-      slug: event.slug,
-      title: event.title,
-      description: event.description,
-      question: event.markets?.[0]?.question || event.title,
-      outcomes: event.markets?.[0]?.outcomes || ['Yes', 'No'],
-      outcomePrices: (event.markets?.[0]?.outcomePrices || ['0.5', '0.5']).map(Number),
-      liquidity: event.liquidity || 0,
-      volume: event.volume || 0,
-      endDate: event.endDate,
-      active: event.active,
-      polymarketUrl: `${POLYMARKET_BASE}/${event.slug}`,
-      bestBid: event.markets?.[0]?.bestBid || 0,
-      bestAsk: event.markets?.[0]?.bestAsk || 0,
-      source: 'polymarket',
-    }));
+      if (market) {
+        outcomes = parseJsonField(market.outcomes, ['Yes', 'No']);
+        const rawPrices = parseJsonField(market.outcomePrices, []);
+        if (rawPrices.length > 0) {
+          outcomePrices = rawPrices.map(p => parseFloat(p) || 0.5);
+        }
+      }
+
+      const yesPrice = outcomePrices[0] || 0.5;
+
+      return {
+        id: `poly_${event.id}`,
+        polymarketId: event.id,
+        slug: event.slug,
+        title: event.title,
+        description: event.description,
+        question: market?.question || event.title,
+        outcomes,
+        outcomePrices,
+        liquidity: event.liquidity || 0,
+        volume: event.volume || 0,
+        endDate: event.endDate,
+        active: event.active,
+        polymarketUrl: `${POLYMARKET_BASE}/${event.slug}`,
+        bestBid: yesPrice,
+        bestAsk: 1 - yesPrice,
+        source: 'polymarket',
+      };
+    });
   } catch (err) {
     console.error('Polymarket fetch failed:', err);
     return [];
