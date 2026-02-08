@@ -236,13 +236,15 @@ GRAPH ACTIONS — include these in your responses to interact with the graph:
 - [HIGHLIGHT:id1,id2,id3] — highlight specific papers on the graph
 - [ZOOM:id] — zoom the graph to focus on a specific paper
 - [PATH:id1,id2] — highlight the citation path between two papers
+- [SEARCH:query] — search Semantic Scholar for papers matching the query and ADD them to the graph. Use this when the user asks to find, search for, or add papers on a topic not well covered in the current graph.
 
 RULES:
 - Reference papers by their exact title in quotes
 - When suggesting papers, include the [HIGHLIGHT:...] action with their IDs
 - Be concise but insightful. You're a research guide, not a textbook.
 - When you trace a path, use [PATH:...] so the user can see it on the graph
-- When asked about a specific paper, use [ZOOM:...] to navigate to it`;
+- When asked about a specific paper, use [ZOOM:...] to navigate to it
+- When the user asks to search for or add papers on a topic, use [SEARCH:topic] to fetch them from Semantic Scholar and add to the graph. You can use multiple [SEARCH:...] actions for broader searches.`;
 }
 
 export function assembleContext(query, graphData) {

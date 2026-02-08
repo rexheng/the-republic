@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { FadeIn } from '@/components/ui/fade-in';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import { Play, Pause, BrainCircuit, Import, Compass } from 'lucide-react';
+import { Play, Pause, BrainCircuit, Import, Compass, Download } from 'lucide-react';
 
 // Field-based color mapping — covers both Semantic Scholar and OpenAlex field names
 const FIELD_COLORS = {
@@ -662,15 +662,48 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
           />
           <span className="font-mono text-xs uppercase tracking-widest text-neutral-500">Color by field</span>
         </div>
-        <Button
-          variant={showAgent ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setShowAgent(!showAgent)}
-          className="font-mono text-xs uppercase tracking-widest ml-auto"
-        >
-          <Compass className="mr-1.5 h-3.5 w-3.5" />
-          Research Navigator
-        </Button>
+        <div className="flex items-center gap-2 ml-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const exportData = {
+                papers: graphData.nodes.map(n => ({
+                  id: n.id, title: n.title, authors: n.authors, year: n.year,
+                  citationCount: n.citationCount, fieldsOfStudy: n.fieldsOfStudy,
+                  abstract: n.abstract, doi: n.doi, arxivId: n.arxivId, source: n.source,
+                })),
+                citations: graphData.links.map(l => ({
+                  source: typeof l.source === 'object' ? l.source.id : l.source,
+                  target: typeof l.target === 'object' ? l.target.id : l.target,
+                  predicted: l.predicted || false,
+                })),
+                exportedAt: new Date().toISOString(),
+                stats: { papers: graphData.nodes.length, citations: graphData.links.length },
+              };
+              const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `republic-knowledge-graph-${new Date().toISOString().slice(0, 10)}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="font-mono text-xs uppercase tracking-widest"
+          >
+            <Download className="mr-1.5 h-3.5 w-3.5" />
+            Export
+          </Button>
+          <Button
+            variant={showAgent ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setShowAgent(!showAgent)}
+            className="font-mono text-xs uppercase tracking-widest"
+          >
+            <Compass className="mr-1.5 h-3.5 w-3.5" />
+            Research Navigator
+          </Button>
+        </div>
       </div>
 
       {/* Field Filter Checkboxes (shown when color by field is active) */}
@@ -790,6 +823,7 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
           <ResearchAgent
             graphData={graphData}
             onGraphAction={handleGraphAction}
+            onAddPapers={(papers) => setGraphData(prev => buildGraphFromPapers(papers, prev))}
             onClose={() => setShowAgent(false)}
           />
         </div>

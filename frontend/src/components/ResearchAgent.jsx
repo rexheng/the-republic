@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Settings, X, Send, ArrowUp } from 'lucide-react';
+import { Settings, X, Send, ArrowUp, Search, Download } from 'lucide-react';
 import { buildSystemPrompt, assembleContext, findCitationPath } from '../utils/ragRetrieval';
 import { PROVIDERS, detectProvider, callClaude, callOpenAI } from '../utils/llm';
+import { searchPapers, buildGraphFromPapers } from '../utils/semanticScholar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -22,22 +23,26 @@ function parseActions(text) {
   }).replace(/\[PATH:([\w]+),([\w]+)\]/g, (_, id1, id2) => {
     actions.push({ type: 'path', from: id1.trim(), to: id2.trim() });
     return '';
+  }).replace(/\[SEARCH:([^\]]+)\]/g, (_, query) => {
+    actions.push({ type: 'search', query: query.trim() });
+    return '';
   });
   return { text: cleaned.trim(), actions };
 }
 
 const STARTERS = [
   'What are the most influential papers in this graph?',
+  'Search for papers on quantum machine learning and add them to the graph',
   'Trace the path from LSTMs to GPT-4',
   'Find connections between biology and machine learning',
-  'What are the hottest research areas in the last 3 years?',
-  'Recommend papers on diffusion models',
+  'Search for recent papers on protein folding with AlphaFold',
 ];
 
-function ResearchAgent({ graphData, onGraphAction, onClose }) {
+function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [searchingPapers, setSearchingPapers] = useState(false);
   const [apiKey, setApiKey] = useState(() => localStorage.getItem(API_KEY_STORAGE) || '');
   const [provider, setProvider] = useState(() => localStorage.getItem(PROVIDER_STORAGE) || 'claude');
   const [apiUrl, setApiUrl] = useState(() => localStorage.getItem(API_URL_STORAGE) || '');
@@ -124,8 +129,23 @@ function ResearchAgent({ graphData, onGraphAction, onClose }) {
 
       const { text: cleanContent, actions } = parseActions(rawContent);
 
+      // Handle search actions — fetch from S2 and add to graph
       for (const action of actions) {
-        if (action.type === 'path') {
+        if (action.type === 'search' && onAddPapers) {
+          setSearchingPapers(true);
+          try {
+            const results = await searchPapers(action.query, 10);
+            if (results.length > 0) {
+              onAddPapers(results);
+              // Auto-highlight newly added papers
+              const newIds = results.map(r => r.paperId || r.id);
+              if (onGraphAction) onGraphAction({ type: 'highlight', ids: newIds });
+            }
+          } catch (e) {
+            console.error('Search action failed:', e);
+          }
+          setSearchingPapers(false);
+        } else if (action.type === 'path') {
           const path = findCitationPath(action.from, action.to, graphData);
           if (path && onGraphAction) onGraphAction({ type: 'path', ids: path });
         } else if (onGraphAction) {
@@ -183,6 +203,7 @@ function ResearchAgent({ graphData, onGraphAction, onClose }) {
                   {action.type === 'highlight' && `Show ${action.ids.length} papers`}
                   {action.type === 'zoom' && 'Zoom to paper'}
                   {action.type === 'path' && 'Show path'}
+                  {action.type === 'search' && `Added: "${action.query}"`}
                 </Button>
               ))}
             </div>
@@ -346,7 +367,7 @@ function ResearchAgent({ graphData, onGraphAction, onClose }) {
         {loading && (
           <div className="flex justify-start mb-3">
             <div className="bg-neutral-50 border border-neutral-200 px-4 py-2 text-sm text-neutral-400">
-              Thinking...
+              {searchingPapers ? 'Searching Semantic Scholar...' : 'Thinking...'}
             </div>
           </div>
         )}
