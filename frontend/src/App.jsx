@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ethers } from 'ethers';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wallet, ChevronDown, ExternalLink, Plus } from 'lucide-react';
 import { CONTRACTS, NETWORKS, ABIS } from './config';
+import { loadInitialGraph } from './utils/semanticScholar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -50,6 +51,16 @@ function App() {
   const [importData, setImportData] = useState(null);
   const [agentPaper, setAgentPaper] = useState(null);
   const [labPaper, setLabPaper] = useState(null);
+
+  // Graph data — lifted here so it persists across tab switches
+  const [graphData, setGraphData] = useState({ nodes: [], links: [] });
+  const graphLoaded = useRef(false);
+
+  useEffect(() => {
+    if (graphLoaded.current) return;
+    graphLoaded.current = true;
+    loadInitialGraph().then(data => setGraphData(data));
+  }, []);
 
   // Track mode from URL
   const urlParams = new URLSearchParams(window.location.search);
@@ -386,6 +397,8 @@ function App() {
                 <KnowledgeGraph
                   contracts={contracts}
                   account={account}
+                  graphData={graphData}
+                  setGraphData={setGraphData}
                   onImportPaper={handleImportPaper}
                   onMakeRunnable={handleMakeRunnable}
                   onReplicate={handleReplicate}

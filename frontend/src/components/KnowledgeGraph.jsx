@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { GRAPH_COLORS } from '../config';
-import { loadInitialGraph, searchPapers, buildGraphFromPapers, mergeOnChainPapers } from '../utils/semanticScholar';
+import { searchPapers, buildGraphFromPapers, mergeOnChainPapers } from '../utils/semanticScholar';
 import PaperDetail from './PaperDetail';
 import GNNPredictor from './GNNPredictor';
 import ResearchAgent from './ResearchAgent';
@@ -79,12 +79,11 @@ function getFieldColor(node) {
   return FIELD_DISPLAY[cat] || FIELD_DISPLAY['Other'];
 }
 
-function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onReplicate }) {
-  const [graphData, setGraphData] = useState({ nodes: [], links: [] });
+function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportPaper, onMakeRunnable, onReplicate }) {
   const [selectedPaper, setSelectedPaper] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const loading = graphData.nodes.length === 0;
   const [stats, setStats] = useState({ total: 0, onChain: 0, external: 0 });
   const [filters, setFilters] = useState({
     showExternal: true,
@@ -144,20 +143,7 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
     };
   }, [showControls, showGNNPanel]);
 
-  // Load initial graph
-  useEffect(() => {
-    let cancelled = false;
-    async function init() {
-      setLoading(true);
-      const data = await loadInitialGraph();
-      if (!cancelled) {
-        setGraphData(data);
-        setLoading(false);
-      }
-    }
-    init();
-    return () => { cancelled = true; };
-  }, []);
+  // Initial graph loaded by App.jsx — no need to load here
 
   // Merge on-chain papers
   useEffect(() => {
