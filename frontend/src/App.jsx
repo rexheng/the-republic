@@ -1,15 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, ChevronDown, ExternalLink } from 'lucide-react';
+import { Wallet, ChevronDown, ExternalLink, Plus } from 'lucide-react';
 import { CONTRACTS, NETWORKS, ABIS } from './config';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import SubmitPaper from './components/SubmitPaper';
-import PaperList from './components/PaperList';
-import ReviewPanel from './components/ReviewPanel';
-import Stats from './components/Stats';
 import NetworkCheck from './components/NetworkCheck';
 import KnowledgeGraph from './components/KnowledgeGraph';
 import Paper2Agent from './components/Paper2Agent';
@@ -17,8 +14,6 @@ import PredictionMarket from './components/PredictionMarket';
 import AIResearchLab from './components/AIResearchLab';
 import Vision from './components/Vision';
 import KaggleLab from './components/KaggleLab';
-import AgentCommandCentre from './components/AgentCommandCentre';
-import ChainStatus from './components/ChainStatus';
 import ResearchFeed from './components/ResearchFeed';
 
 // Track-focused mode: ?track=defi | ?track=ai | ?track=consumer | (none = full)
@@ -27,21 +22,21 @@ const TRACK_CONFIG = {
     label: 'Prediction Markets + DeFi',
     subtitle: 'LMSR Truth Discovery for Science',
     defaultTab: 'predict',
-    tabs: ['vision', 'graph', 'submit', 'predict', 'stats', 'feed'],
+    tabs: ['graph', 'predict', 'feed'],
     color: '#10b981', // emerald
   },
   ai: {
     label: 'AI Middleware & Application',
     subtitle: 'Autonomous Agent Swarms with TRiSM Guardrails',
-    defaultTab: 'command',
-    tabs: ['vision', 'graph', 'command', 'lab', 'kaggle', 'feed'],
+    defaultTab: 'lab',
+    tabs: ['graph', 'lab', 'kaggle', 'feed'],
     color: '#8b5cf6', // violet
   },
   consumer: {
     label: 'New Consumer Primitives',
     subtitle: 'Reimagining Academic Publishing',
     defaultTab: 'feed',
-    tabs: ['vision', 'graph', 'papers', 'submit', 'feed', 'agent', 'predict'],
+    tabs: ['graph', 'feed', 'agent', 'predict'],
     color: '#f59e0b', // amber
   },
 };
@@ -141,11 +136,23 @@ function App() {
 
       {/* Navigation */}
       <nav className="fixed top-0 w-full z-50 px-6 md:px-12 py-4 flex justify-between items-center bg-white/90 backdrop-blur-sm border-b border-neutral-100">
-        <div className="font-mono font-bold tracking-tighter text-xl">
-          THE REPUBLIC
+        <div className="flex items-center gap-6">
+          <div className="font-mono font-bold tracking-tighter text-xl">
+            THE REPUBLIC
+          </div>
+          {account && (
+            <button
+              onClick={() => setActiveTab('vision')}
+              className={`font-mono text-[10px] uppercase tracking-widest transition-colors hidden md:block ${
+                activeTab === 'vision' ? 'text-neutral-900 font-bold' : 'text-neutral-400 hover:text-neutral-900'
+              }`}
+            >
+              About
+            </button>
+          )}
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {trackConfig && (
             <a
               href="/"
@@ -153,6 +160,17 @@ function App() {
             >
               All Tracks
             </a>
+          )}
+          {account && (
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8 border-neutral-300 text-neutral-600 hover:bg-neutral-900 hover:text-white hover:border-neutral-900 transition-colors"
+              onClick={() => setActiveTab('submit')}
+              title="Submit Paper"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
           )}
           {!account ? (
             <Button
@@ -324,9 +342,9 @@ function App() {
           /* Authenticated View */
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <div className="border-b border-neutral-200 bg-white sticky top-[72px] z-40">
-              <div className="max-w-7xl mx-auto px-6 md:px-12 flex items-center justify-between overflow-x-auto no-scrollbar">
+              <div className="max-w-7xl mx-auto px-6 md:px-12 flex items-center overflow-x-auto no-scrollbar">
                 {trackConfig && (
-                  <div className="flex items-center gap-2 mr-4 py-2">
+                  <div className="flex items-center gap-2 mr-4 py-2 flex-shrink-0">
                     <span
                       className="inline-block w-2 h-2 rounded-full animate-pulse"
                       style={{ backgroundColor: trackConfig.color }}
@@ -334,55 +352,26 @@ function App() {
                     <span className="font-mono text-[10px] uppercase tracking-widest font-bold" style={{ color: trackConfig.color }}>
                       {trackConfig.label}
                     </span>
-                    <span className="font-mono text-[9px] text-neutral-400 hidden md:inline">
-                      — {trackConfig.subtitle}
-                    </span>
                   </div>
                 )}
                 <TabsList className="border-b-0 py-2">
                   {(!trackConfig) ? (
                     <>
-                      <div className="flex items-center mr-4 pr-4 border-r border-neutral-100">
-                        <span className="font-mono text-[9px] uppercase tracking-tighter text-neutral-400 mr-2">Core</span>
-                        <TabsTrigger value="vision">Vision</TabsTrigger>
-                        <TabsTrigger value="graph">Network</TabsTrigger>
-                        <TabsTrigger value="papers">Library</TabsTrigger>
-                        <TabsTrigger value="submit">Launch</TabsTrigger>
-                      </div>
-
-                      <div className="flex items-center mr-4 pr-4 border-r border-neutral-100">
-                        <span className="font-mono text-[9px] uppercase tracking-tighter text-neutral-400 mr-2">Track A: DeFi</span>
-                        <TabsTrigger value="predict">Knowledge Exchange</TabsTrigger>
-                        <TabsTrigger value="stats">Treasury</TabsTrigger>
-                      </div>
-
-                      <div className="flex items-center mr-4 pr-4 border-r border-neutral-100">
-                        <span className="font-mono text-[9px] uppercase tracking-tighter text-neutral-400 mr-2">Track B: AI Swarm</span>
-                        <TabsTrigger value="command">Agent Swarm</TabsTrigger>
-                        <TabsTrigger value="lab">AI Lab</TabsTrigger>
-                        <TabsTrigger value="kaggle">Kaggle Agent</TabsTrigger>
-                      </div>
-
-                      <div className="flex items-center">
-                        <span className="font-mono text-[9px] uppercase tracking-tighter text-neutral-400 mr-2">Track C: Consumer</span>
-                        <TabsTrigger value="feed">Live Feed</TabsTrigger>
-                        <TabsTrigger value="agent">Paper2Agent</TabsTrigger>
-                      </div>
+                      <TabsTrigger value="graph">Network</TabsTrigger>
+                      <TabsTrigger value="lab">AI Lab</TabsTrigger>
+                      <TabsTrigger value="predict">Markets</TabsTrigger>
+                      <TabsTrigger value="kaggle">Kaggle</TabsTrigger>
+                      <TabsTrigger value="agent">Paper2Agent</TabsTrigger>
+                      <TabsTrigger value="feed">Live Feed</TabsTrigger>
                     </>
                   ) : (
-                    /* Track-focused mode: only show allowed tabs */
                     <>
-                      {trackConfig.tabs.includes('vision') && <TabsTrigger value="vision">Vision</TabsTrigger>}
                       {trackConfig.tabs.includes('graph') && <TabsTrigger value="graph">Network</TabsTrigger>}
-                      {trackConfig.tabs.includes('papers') && <TabsTrigger value="papers">Library</TabsTrigger>}
-                      {trackConfig.tabs.includes('submit') && <TabsTrigger value="submit">Launch</TabsTrigger>}
-                      {trackConfig.tabs.includes('predict') && <TabsTrigger value="predict">Markets</TabsTrigger>}
-                      {trackConfig.tabs.includes('stats') && <TabsTrigger value="stats">Treasury</TabsTrigger>}
-                      {trackConfig.tabs.includes('command') && <TabsTrigger value="command">Agent Swarm</TabsTrigger>}
                       {trackConfig.tabs.includes('lab') && <TabsTrigger value="lab">AI Lab</TabsTrigger>}
-                      {trackConfig.tabs.includes('kaggle') && <TabsTrigger value="kaggle">Kaggle Agent</TabsTrigger>}
-                      {trackConfig.tabs.includes('feed') && <TabsTrigger value="feed">Live Feed</TabsTrigger>}
+                      {trackConfig.tabs.includes('predict') && <TabsTrigger value="predict">Markets</TabsTrigger>}
+                      {trackConfig.tabs.includes('kaggle') && <TabsTrigger value="kaggle">Kaggle</TabsTrigger>}
                       {trackConfig.tabs.includes('agent') && <TabsTrigger value="agent">Paper2Agent</TabsTrigger>}
+                      {trackConfig.tabs.includes('feed') && <TabsTrigger value="feed">Live Feed</TabsTrigger>}
                     </>
                   )}
                 </TabsList>
@@ -402,23 +391,11 @@ function App() {
                   onReplicate={handleReplicate}
                 />
               </TabsContent>
-              <TabsContent value="papers">
-                <PaperList contracts={contracts} account={account} />
-              </TabsContent>
               <TabsContent value="submit">
                 <SubmitPaper contracts={contracts} account={account} importData={importData} />
               </TabsContent>
-              <TabsContent value="review">
-                <ReviewPanel contracts={contracts} account={account} />
-              </TabsContent>
               <TabsContent value="predict">
                 <PredictionMarket contracts={contracts} account={account} />
-              </TabsContent>
-              <TabsContent value="command">
-                <AgentCommandCentre />
-              </TabsContent>
-              <TabsContent value="chains">
-                <ChainStatus />
               </TabsContent>
               <TabsContent value="agent">
                 <Paper2Agent agentPaper={agentPaper} />
@@ -431,9 +408,6 @@ function App() {
               </TabsContent>
               <TabsContent value="feed">
                 <ResearchFeed />
-              </TabsContent>
-              <TabsContent value="stats">
-                <Stats contracts={contracts} account={account} />
               </TabsContent>
             </div>
           </Tabs>

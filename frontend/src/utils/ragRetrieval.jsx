@@ -244,7 +244,9 @@ RULES:
 - Be concise but insightful. You're a research guide, not a textbook.
 - When you trace a path, use [PATH:...] so the user can see it on the graph
 - When asked about a specific paper, use [ZOOM:...] to navigate to it
-- When the user asks to search for or add papers on a topic, use [SEARCH:topic] to fetch them from Semantic Scholar and add to the graph. You can use multiple [SEARCH:...] actions for broader searches.`;
+- When the user asks to search for or add papers on a topic, use [SEARCH:topic] to fetch them from Semantic Scholar and add to the graph. You can use multiple [SEARCH:...] actions for broader searches.
+- Do NOT include citation counts, paper IDs, or raw identifiers in your text — they will be shown automatically with real data from the graph. Focus on explaining relationships, insights, and significance.
+- Write in clean prose paragraphs. Avoid markdown headers (##), bold markers (**), or bullet lists. Use natural flowing text.`;
 }
 
 export function assembleContext(query, graphData) {
@@ -258,10 +260,11 @@ export function assembleContext(query, graphData) {
   // 3. Get expanded papers, ranked by original score + citation importance
   const paperMap = new Map(graphData.nodes.map(n => [n.id, n]));
   const contextPapers = [];
+  const maxScore = results.length > 0 ? results[0].score : 1;
 
-  // First: directly matched papers
+  // First: directly matched papers (with relevance scores)
   for (const r of results) {
-    contextPapers.push(r.paper);
+    contextPapers.push({ ...r.paper, relevanceScore: r.score / maxScore });
   }
 
   // Then: citation neighbors (top by citations, capped)
@@ -273,7 +276,10 @@ export function assembleContext(query, graphData) {
     }
   }
   neighborPapers.sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0));
-  contextPapers.push(...neighborPapers.slice(0, 10));
+  contextPapers.push(...neighborPapers.slice(0, 10).map((p, i) => ({
+    ...p,
+    relevanceScore: Math.max(0.1, 0.4 - i * 0.03), // citation neighbors get lower relevance
+  })));
 
   // Format for LLM
   const paperContext = contextPapers

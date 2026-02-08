@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { FadeIn } from '@/components/ui/fade-in';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import { Play, Pause, BrainCircuit, Import, Compass, Download, Upload } from 'lucide-react';
+import { Play, Pause, BrainCircuit, Import, Compass, Download, Upload, ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
 
 // Field-based color mapping — covers both Semantic Scholar and OpenAlex field names
 const FIELD_COLORS = {
@@ -113,24 +113,32 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
   const [highlightedIds, setHighlightedIds] = useState(new Set());
   const [pathIds, setPathIds] = useState(new Set());
 
+  // Controls collapsed state
+  const [showControls, setShowControls] = useState(false);
+
   // Time animation state
   const [playing, setPlaying] = useState(false);
   const playRef = useRef(false);
 
-  // Resize handler
+  // Resize handler — measures actual container size
   useEffect(() => {
     const updateDimensions = () => {
       if (containerRef.current) {
         setDimensions({
           width: containerRef.current.offsetWidth,
-          height: Math.max(500, window.innerHeight - 300),
+          height: containerRef.current.offsetHeight || 400,
         });
       }
     };
     updateDimensions();
     window.addEventListener('resize', updateDimensions);
-    return () => window.removeEventListener('resize', updateDimensions);
-  }, []);
+    // Also re-measure when controls or agent panel toggle
+    const raf = requestAnimationFrame(updateDimensions);
+    return () => {
+      window.removeEventListener('resize', updateDimensions);
+      cancelAnimationFrame(raf);
+    };
+  }, [showAgent, showControls, showGNNPanel]);
 
   // Load initial graph
   useEffect(() => {
@@ -507,101 +515,250 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
   }, []);
 
   return (
-    <div className="flex flex-col gap-0 w-full">
-      {/* Search Bar */}
-      <form className="flex gap-2 p-4 pb-2" onSubmit={handleSearch}>
-        <Input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search papers (e.g., BERT, diffusion models, reinforcement learning)..."
-          className="flex-1 bg-white border-neutral-200 font-light text-neutral-700 placeholder:text-neutral-400"
-        />
-        <Button type="submit" variant="outline" disabled={searching} className="border-neutral-300 font-mono text-xs uppercase tracking-widest">
-          {searching ? 'Searching...' : 'Search'}
-        </Button>
-      </form>
-
-      {/* Filters */}
-      <FadeIn>
-        <div className="flex flex-wrap items-center gap-4 px-4 py-2">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={filters.showExternal}
-              onChange={(e) => setFilters(f => ({ ...f, showExternal: e.target.checked }))}
-              className="accent-neutral-700"
-            />
-            <span className="font-mono text-xs uppercase tracking-widest" style={{ color: GRAPH_COLORS.EXTERNAL }}>External Papers</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={filters.showOnChain}
-              onChange={(e) => setFilters(f => ({ ...f, showOnChain: e.target.checked }))}
-              className="accent-neutral-700"
-            />
-            <span className="font-mono text-xs uppercase tracking-widest" style={{ color: GRAPH_COLORS.ONCHAIN }}>On-Chain Papers</span>
-          </label>
-
-          <Separator orientation="vertical" className="h-6" />
-
-          <div className="flex flex-col gap-1 min-w-[180px]">
-            <span className="font-mono text-xs uppercase tracking-widest text-neutral-400">
-              Min Citations: {filters.minCitations.toLocaleString()}
-            </span>
-            <input
-              type="range"
-              min="0"
-              max={maxCitationInData}
-              step="1000"
-              value={filters.minCitations}
-              onChange={(e) => setFilters(f => ({ ...f, minCitations: Number(e.target.value) }))}
-              className="w-full accent-neutral-500"
-            />
-          </div>
-          <div className="flex flex-col gap-1 min-w-[180px]">
-            <span className="font-mono text-xs uppercase tracking-widest text-neutral-400">
-              Max Citations: {filters.maxCitations.toLocaleString()}
-            </span>
-            <input
-              type="range"
-              min="0"
-              max={maxCitationInData}
-              step="1000"
-              value={filters.maxCitations}
-              onChange={(e) => setFilters(f => ({ ...f, maxCitations: Number(e.target.value) }))}
-              className="w-full accent-neutral-500"
-            />
-          </div>
-        </div>
-      </FadeIn>
-
-      {/* Time Slider */}
-      <div className="px-4 py-2">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => {
-              if (playing) {
-                setPlaying(false);
-              } else {
-                setFilters(f => ({ ...f, yearRange: [f.yearRange[0], f.yearRange[0]] }));
-                setTimeout(() => setPlaying(true), 50);
-              }
-            }}
-            title={playing ? 'Pause' : 'Play animation'}
-            className="h-8 w-8 text-neutral-500 hover:text-neutral-900"
-          >
-            {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+    <div className="flex flex-col w-full overflow-hidden" style={{ height: 'calc(100vh - 120px)' }}>
+      {/* Toolbar — always visible: search + action buttons in one compact row */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-neutral-200 bg-white flex-shrink-0">
+        {/* Search */}
+        <form className="flex gap-2 flex-1 min-w-0" onSubmit={handleSearch}>
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search papers..."
+            className="flex-1 bg-white border-neutral-200 font-light text-neutral-700 placeholder:text-neutral-400 h-8 text-sm"
+          />
+          <Button type="submit" variant="outline" disabled={searching} size="sm" className="border-neutral-300 font-mono text-[10px] uppercase tracking-widest h-8">
+            {searching ? '...' : 'Search'}
           </Button>
-          <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-neutral-500">
-            <span>{filters.yearRange[0]}</span>
-            <span className="text-neutral-300">to</span>
-            <span>{filters.yearRange[1]}</span>
+        </form>
+
+        <Separator orientation="vertical" className="h-6" />
+
+        {/* Core actions */}
+        <Button
+          variant={showGNNPanel ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setShowGNNPanel(!showGNNPanel)}
+          className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
+        >
+          <BrainCircuit className="mr-1 h-3.5 w-3.5" />
+          GNN
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleBulkImport}
+          disabled={importing}
+          className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
+        >
+          <Import className="mr-1 h-3.5 w-3.5" />
+          {importing ? 'Importing...' : 'Import'}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.json';
+            fileInput.onchange = (e) => {
+              const file = e.target.files[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = (ev) => {
+                try {
+                  const data = JSON.parse(ev.target.result);
+                  const papers = data.papers || data.nodes || [];
+                  const citations = data.citations || data.links || [];
+                  if (papers.length === 0) return;
+                  setGraphData(prev => {
+                    const nodeMap = new Map();
+                    prev.nodes.forEach(n => nodeMap.set(n.id, n));
+                    papers.forEach(p => {
+                      if (!nodeMap.has(p.id)) {
+                        nodeMap.set(p.id, {
+                          ...p,
+                          paperId: p.paperId || p.id,
+                          val: Math.max(2, Math.log10((p.citationCount || 1) + 1) * 3),
+                          source: p.source || 'imported',
+                        });
+                      }
+                    });
+                    const linkSet = new Set();
+                    const allLinks = [];
+                    prev.links.forEach(l => {
+                      const src = typeof l.source === 'object' ? l.source.id : l.source;
+                      const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+                      linkSet.add(`${src}->${tgt}`);
+                      allLinks.push(l);
+                    });
+                    const nodeIds = new Set(nodeMap.keys());
+                    citations.forEach(c => {
+                      const src = typeof c.source === 'object' ? c.source.id : c.source;
+                      const tgt = typeof c.target === 'object' ? c.target.id : c.target;
+                      const key = `${src}->${tgt}`;
+                      if (!linkSet.has(key) && nodeIds.has(src) && nodeIds.has(tgt)) {
+                        linkSet.add(key);
+                        allLinks.push({ source: src, target: tgt, predicted: c.predicted || false });
+                      }
+                    });
+                    return { nodes: Array.from(nodeMap.values()), links: allLinks };
+                  });
+                } catch (err) {
+                  console.error('Import failed:', err);
+                }
+              };
+              reader.readAsText(file);
+            };
+            fileInput.click();
+          }}
+          className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
+        >
+          <Upload className="mr-1 h-3.5 w-3.5" />
+          Load
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const exportData = {
+              papers: graphData.nodes.map(n => ({
+                id: n.id, title: n.title, authors: n.authors, year: n.year,
+                citationCount: n.citationCount, fieldsOfStudy: n.fieldsOfStudy,
+                abstract: n.abstract, doi: n.doi, arxivId: n.arxivId, source: n.source,
+              })),
+              citations: graphData.links.map(l => ({
+                source: typeof l.source === 'object' ? l.source.id : l.source,
+                target: typeof l.target === 'object' ? l.target.id : l.target,
+                predicted: l.predicted || false,
+              })),
+              exportedAt: new Date().toISOString(),
+              stats: { papers: graphData.nodes.length, citations: graphData.links.length },
+            };
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `republic-knowledge-graph-${new Date().toISOString().slice(0, 10)}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
+        >
+          <Download className="mr-1 h-3.5 w-3.5" />
+          Export
+        </Button>
+
+        <Separator orientation="vertical" className="h-6" />
+
+        <Button
+          variant={showControls ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setShowControls(!showControls)}
+          className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
+        >
+          <SlidersHorizontal className="mr-1 h-3.5 w-3.5" />
+          Filters
+          {showControls ? <ChevronUp className="ml-1 h-3 w-3" /> : <ChevronDown className="ml-1 h-3 w-3" />}
+        </Button>
+        <Button
+          variant={showAgent ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setShowAgent(!showAgent)}
+          className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
+        >
+          <Compass className="mr-1 h-3.5 w-3.5" />
+          Navigator
+        </Button>
+      </div>
+
+      {/* Collapsible controls panel */}
+      {showControls && (
+        <div className="flex-shrink-0 border-b border-neutral-200 bg-neutral-50 px-4 py-2 space-y-2">
+          {/* Filters row */}
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filters.showExternal}
+                onChange={(e) => setFilters(f => ({ ...f, showExternal: e.target.checked }))}
+                className="accent-neutral-700"
+              />
+              <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: GRAPH_COLORS.EXTERNAL }}>External</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filters.showOnChain}
+                onChange={(e) => setFilters(f => ({ ...f, showOnChain: e.target.checked }))}
+                className="accent-neutral-700"
+              />
+              <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: GRAPH_COLORS.ONCHAIN }}>On-Chain</span>
+            </label>
+
+            <Separator orientation="vertical" className="h-5" />
+
+            <div className="flex items-center gap-2 min-w-[160px]">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-400 whitespace-nowrap">
+                Min: {filters.minCitations.toLocaleString()}
+              </span>
+              <input
+                type="range"
+                min="0"
+                max={maxCitationInData}
+                step="1000"
+                value={filters.minCitations}
+                onChange={(e) => setFilters(f => ({ ...f, minCitations: Number(e.target.value) }))}
+                className="w-24 accent-neutral-500"
+              />
+            </div>
+            <div className="flex items-center gap-2 min-w-[160px]">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-400 whitespace-nowrap">
+                Max: {filters.maxCitations.toLocaleString()}
+              </span>
+              <input
+                type="range"
+                min="0"
+                max={maxCitationInData}
+                step="1000"
+                value={filters.maxCitations}
+                onChange={(e) => setFilters(f => ({ ...f, maxCitations: Number(e.target.value) }))}
+                className="w-24 accent-neutral-500"
+              />
+            </div>
+
+            <Separator orientation="vertical" className="h-5" />
+
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={colorByField}
+                onCheckedChange={setColorByField}
+              />
+              <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-500">Color by field</span>
+            </div>
           </div>
-          <div className="flex flex-1 gap-2">
+
+          {/* Time slider row */}
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                if (playing) {
+                  setPlaying(false);
+                } else {
+                  setFilters(f => ({ ...f, yearRange: [f.yearRange[0], f.yearRange[0]] }));
+                  setTimeout(() => setPlaying(true), 50);
+                }
+              }}
+              title={playing ? 'Pause' : 'Play animation'}
+              className="h-7 w-7 text-neutral-500 hover:text-neutral-900"
+            >
+              {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+            </Button>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-500 whitespace-nowrap">
+              {filters.yearRange[0]}<span className="text-neutral-300 mx-1">to</span>{filters.yearRange[1]}
+            </span>
             <input
               type="range"
               min={yearBounds.min}
@@ -625,179 +782,38 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
               className="flex-1 accent-neutral-500"
             />
           </div>
-        </div>
-      </div>
 
-      {/* Action Buttons Bar */}
-      <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-neutral-200">
-        <Button
-          variant={showGNNPanel ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setShowGNNPanel(!showGNNPanel)}
-          className="font-mono text-xs uppercase tracking-widest"
-        >
-          <BrainCircuit className="mr-1.5 h-3.5 w-3.5" />
-          GNN Link Prediction
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleBulkImport}
-          disabled={importing}
-          className="font-mono text-xs uppercase tracking-widest"
-        >
-          <Import className="mr-1.5 h-3.5 w-3.5" />
-          {importing
-            ? importProgress?.phase === 'fetching'
-              ? `${importProgress.field} (${importProgress.total.toLocaleString()} papers...)`
-              : importProgress?.phase === 'building_edges'
-                ? `Building citation graph (${importProgress.total.toLocaleString()} papers)...`
-                : 'Starting import...'
-            : 'Import ~5,000 Papers (OpenAlex)'}
-        </Button>
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={colorByField}
-            onCheckedChange={setColorByField}
-          />
-          <span className="font-mono text-xs uppercase tracking-widest text-neutral-500">Color by field</span>
+          {/* Field filter checkboxes */}
+          {colorByField && (
+            <div className="flex flex-wrap items-center gap-3">
+              {Object.entries(FIELD_DISPLAY).map(([field, color]) => (
+                <label key={field} className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filters.fields.has(field)}
+                    onChange={() => toggleField(field)}
+                    className="accent-neutral-700"
+                  />
+                  <span className="font-mono text-[10px] tracking-wide" style={{ color }}>{field}</span>
+                </label>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-2 ml-auto">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.accept = '.json';
-              input.onchange = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                  try {
-                    const data = JSON.parse(ev.target.result);
-                    const papers = data.papers || data.nodes || [];
-                    const citations = data.citations || data.links || [];
-                    if (papers.length === 0) return;
-                    setGraphData(prev => {
-                      const nodeMap = new Map();
-                      prev.nodes.forEach(n => nodeMap.set(n.id, n));
-                      papers.forEach(p => {
-                        if (!nodeMap.has(p.id)) {
-                          nodeMap.set(p.id, {
-                            ...p,
-                            paperId: p.paperId || p.id,
-                            val: Math.max(2, Math.log10((p.citationCount || 1) + 1) * 3),
-                            source: p.source || 'imported',
-                          });
-                        }
-                      });
-                      const linkSet = new Set();
-                      const allLinks = [];
-                      prev.links.forEach(l => {
-                        const src = typeof l.source === 'object' ? l.source.id : l.source;
-                        const tgt = typeof l.target === 'object' ? l.target.id : l.target;
-                        linkSet.add(`${src}->${tgt}`);
-                        allLinks.push(l);
-                      });
-                      const nodeIds = new Set(nodeMap.keys());
-                      citations.forEach(c => {
-                        const src = typeof c.source === 'object' ? c.source.id : c.source;
-                        const tgt = typeof c.target === 'object' ? c.target.id : c.target;
-                        const key = `${src}->${tgt}`;
-                        if (!linkSet.has(key) && nodeIds.has(src) && nodeIds.has(tgt)) {
-                          linkSet.add(key);
-                          allLinks.push({ source: src, target: tgt, predicted: c.predicted || false });
-                        }
-                      });
-                      return { nodes: Array.from(nodeMap.values()), links: allLinks };
-                    });
-                  } catch (err) {
-                    console.error('Import failed:', err);
-                  }
-                };
-                reader.readAsText(file);
-              };
-              input.click();
-            }}
-            className="font-mono text-xs uppercase tracking-widest"
-          >
-            <Upload className="mr-1.5 h-3.5 w-3.5" />
-            Import
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const exportData = {
-                papers: graphData.nodes.map(n => ({
-                  id: n.id, title: n.title, authors: n.authors, year: n.year,
-                  citationCount: n.citationCount, fieldsOfStudy: n.fieldsOfStudy,
-                  abstract: n.abstract, doi: n.doi, arxivId: n.arxivId, source: n.source,
-                })),
-                citations: graphData.links.map(l => ({
-                  source: typeof l.source === 'object' ? l.source.id : l.source,
-                  target: typeof l.target === 'object' ? l.target.id : l.target,
-                  predicted: l.predicted || false,
-                })),
-                exportedAt: new Date().toISOString(),
-                stats: { papers: graphData.nodes.length, citations: graphData.links.length },
-              };
-              const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `republic-knowledge-graph-${new Date().toISOString().slice(0, 10)}.json`;
-              a.click();
-              URL.revokeObjectURL(url);
-            }}
-            className="font-mono text-xs uppercase tracking-widest"
-          >
-            <Download className="mr-1.5 h-3.5 w-3.5" />
-            Export
-          </Button>
-          <Button
-            variant={showAgent ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setShowAgent(!showAgent)}
-            className="font-mono text-xs uppercase tracking-widest"
-          >
-            <Compass className="mr-1.5 h-3.5 w-3.5" />
-            Research Navigator
-          </Button>
-        </div>
-      </div>
-
-      {/* Field Filter Checkboxes (shown when color by field is active) */}
-      {colorByField && (
-        <FadeIn>
-          <div className="flex flex-wrap items-center gap-3 px-4 py-2 bg-neutral-50 border-b border-neutral-200">
-            {Object.entries(FIELD_DISPLAY).map(([field, color]) => (
-              <label key={field} className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={filters.fields.has(field)}
-                  onChange={() => toggleField(field)}
-                  className="accent-neutral-700"
-                />
-                <span className="font-mono text-xs tracking-wide" style={{ color }}>{field}</span>
-              </label>
-            ))}
-          </div>
-        </FadeIn>
       )}
 
       {/* GNN Panel */}
       {showGNNPanel && (
-        <GNNPredictor
-          graphData={graphData}
-          onPredictionsReady={handlePredictions}
-        />
+        <div className="flex-shrink-0 max-h-[30vh] overflow-y-auto">
+          <GNNPredictor
+            graphData={graphData}
+            onPredictionsReady={handlePredictions}
+          />
+        </div>
       )}
 
-      {/* Graph */}
-      <div className="graph-canvas-container relative" ref={containerRef}>
+      {/* Graph — fills all remaining space */}
+      <div className="graph-canvas-container relative flex-1 min-h-0" ref={containerRef}>
         {loading ? (
           <div className="flex flex-col items-center justify-center gap-4 py-24">
             <div className="flex flex-col items-center gap-3">
@@ -880,9 +896,9 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
         </div>
       </div>
 
-      {/* Research Agent Sidebar */}
+      {/* Research Agent Panel (below graph) */}
       {showAgent && (
-        <div className="fixed top-0 right-0 h-full w-[400px] z-50 shadow-lg border-l border-neutral-200 bg-white">
+        <div className="border-t border-neutral-200 bg-white flex-shrink-0" style={{ height: '40vh' }}>
           <ResearchAgent
             graphData={graphData}
             onGraphAction={handleGraphAction}
