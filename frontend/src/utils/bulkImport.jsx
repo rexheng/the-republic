@@ -151,16 +151,19 @@ function setCachedData(data) {
 }
 
 export async function bulkFetchPapers(queries = DEFAULT_QUERIES, onProgress = null) {
-  // Check cache first
-  const cached = getCachedData();
-  if (cached) {
-    if (onProgress) onProgress({
-      phase: 'complete',
-      total: cached.papers.length,
-      citations: cached.citations.length,
-      field: 'cache',
-    });
-    return cached;
+  // Only use cache for the default full import (not custom collection queries)
+  const isDefaultQueries = queries === DEFAULT_QUERIES;
+  if (isDefaultQueries) {
+    const cached = getCachedData();
+    if (cached) {
+      if (onProgress) onProgress({
+        phase: 'complete',
+        total: cached.papers.length,
+        citations: cached.citations.length,
+        field: 'cache',
+      });
+      return cached;
+    }
   }
 
   const allPapers = new Map(); // oaId -> normalized paper
@@ -233,7 +236,7 @@ export async function bulkFetchPapers(queries = DEFAULT_QUERIES, onProgress = nu
   }
 
   const result = { papers, citations };
-  setCachedData(result);
+  if (isDefaultQueries) setCachedData(result);
 
   if (onProgress) onProgress({
     phase: 'complete',

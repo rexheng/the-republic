@@ -2,10 +2,10 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import ForceGraph2D from 'react-force-graph-2d';
 import { GRAPH_COLORS } from '../config';
 import { loadInitialGraph, searchPapers, buildGraphFromPapers, mergeOnChainPapers } from '../utils/semanticScholar';
-import { bulkFetchPapers } from '../utils/bulkImport';
 import PaperDetail from './PaperDetail';
 import GNNPredictor from './GNNPredictor';
 import ResearchAgent from './ResearchAgent';
+import AddPapersPanel from './AddPapersPanel';
 import { findCitationPath } from '../utils/ragRetrieval';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { FadeIn } from '@/components/ui/fade-in';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import { Play, Pause, BrainCircuit, Import, Compass, Download, Upload, ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
+import { Play, Pause, BrainCircuit, Plus, Compass, Download, ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
 
 // Field-based color mapping — covers both Semantic Scholar and OpenAlex field names
 const FIELD_COLORS = {
@@ -104,14 +104,18 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
   const [predictedLinks, setPredictedLinks] = useState(null);
   const [showPredictedLinks, setShowPredictedLinks] = useState(false);
 
-  // Bulk import state
-  const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState(null);
+  // Add Papers panel state
+  const [showAddPanel, setShowAddPanel] = useState(false);
+  const addBtnRef = useRef(null);
 
   // Research Agent state
   const [showAgent, setShowAgent] = useState(false);
   const [highlightedIds, setHighlightedIds] = useState(new Set());
   const [pathIds, setPathIds] = useState(new Set());
+
+  // Spawn animation state — newly added paper nodes
+  const [spawnIds, setSpawnIds] = useState(new Set());
+  const spawnTimers = useRef(new Map());
 
   // Controls collapsed state
   const [showControls, setShowControls] = useState(false);
@@ -138,7 +142,7 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
       window.removeEventListener('resize', updateDimensions);
       cancelAnimationFrame(raf);
     };
-  }, [showAgent, showControls, showGNNPanel]);
+  }, [showControls, showGNNPanel]);
 
   // Load initial graph
   useEffect(() => {
@@ -218,45 +222,93 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
     setSearching(false);
   }, [searchQuery]);
 
-  // Bulk import handler
-  const handleBulkImport = useCallback(async () => {
-    setImporting(true);
-    setImportProgress({ phase: 'starting', total: 0 });
-    try {
-      const { papers, citations } = await bulkFetchPapers(undefined, (progress) => {
-        setImportProgress(progress);
+  // Add single paper (from PDF upload) — with spawn animation + auto-zoom
+  const handleAddPaper = useCallback((paper) => {
+    // Mark as spawning so paintNode renders the entrance animation
+    const paperId = paper.id;
+    paper._spawnTime = Date.now();
+
+    setGraphData(prev => ({
+      nodes: [...prev.nodes, paper],
+      links: prev.links,
+    }));
+
+    // Add to spawn set for animated rendering
+    setSpawnIds(prev => new Set([...prev, paperId]));
+    setHighlightedIds(new Set([paperId]));
+
+    // After animation completes (2s), remove spawn state
+    const timer = setTimeout(() => {
+      setSpawnIds(prev => {
+        const next = new Set(prev);
+        next.delete(paperId);
+        return next;
       });
-      if (papers.length > 0) {
-        setGraphData(prev => {
-          const nodeMap = new Map();
-          prev.nodes.forEach(n => nodeMap.set(n.id, n));
-          papers.forEach(p => {
-            if (!nodeMap.has(p.id)) nodeMap.set(p.id, p);
-          });
-          const linkSet = new Set();
-          const existingLinks = [];
-          prev.links.forEach(l => {
-            const src = typeof l.source === 'object' ? l.source.id : l.source;
-            const tgt = typeof l.target === 'object' ? l.target.id : l.target;
-            linkSet.add(`${src}->${tgt}`);
-            existingLinks.push(l);
-          });
-          const nodeIds = new Set(nodeMap.keys());
-          citations.forEach(c => {
-            const key = `${c.source}->${c.target}`;
-            if (!linkSet.has(key) && nodeIds.has(c.source) && nodeIds.has(c.target)) {
-              linkSet.add(key);
-              existingLinks.push(c);
-            }
-          });
-          return { nodes: Array.from(nodeMap.values()), links: existingLinks };
-        });
+    }, 2500);
+    spawnTimers.current.set(paperId, timer);
+
+    // Auto-clear highlight after 8s
+    setTimeout(() => setHighlightedIds(prev => {
+      const next = new Set(prev);
+      next.delete(paperId);
+      return next;
+    }), 8000);
+
+    // Zoom to the new node after a brief delay (let force layout place it)
+    setTimeout(() => {
+      const node = fgRef.current?.graphData?.().nodes?.find(n => n.id === paperId);
+      if (node && fgRef.current) {
+        fgRef.current.centerAt(node.x, node.y, 800);
+        fgRef.current.zoom(3, 800);
       }
-    } catch (err) {
-      console.error('Bulk import error:', err);
-    }
-    setImporting(false);
-    setImportProgress(null);
+    }, 500);
+
+    // Keep the simulation warm during animation so canvas repaints
+    const reheat = () => {
+      if (fgRef.current) {
+        fgRef.current.d3ReheatSimulation();
+      }
+    };
+    reheat();
+    const reheatInterval = setInterval(reheat, 300);
+    setTimeout(() => clearInterval(reheatInterval), 3000);
+  }, []);
+
+  // Import papers + citations from JSON or bulk sources
+  const handleImportPapers = useCallback((papers, citations = []) => {
+    setGraphData(prev => {
+      const nodeMap = new Map();
+      prev.nodes.forEach(n => nodeMap.set(n.id, n));
+      papers.forEach(p => {
+        if (!nodeMap.has(p.id)) {
+          nodeMap.set(p.id, {
+            ...p,
+            paperId: p.paperId || p.id,
+            val: p.val || Math.max(2, Math.log10((p.citationCount || 1) + 1) * 3),
+            source: p.source || 'imported',
+          });
+        }
+      });
+      const linkSet = new Set();
+      const allLinks = [];
+      prev.links.forEach(l => {
+        const src = typeof l.source === 'object' ? l.source.id : l.source;
+        const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+        linkSet.add(`${src}->${tgt}`);
+        allLinks.push(l);
+      });
+      const nodeIds = new Set(nodeMap.keys());
+      citations.forEach(c => {
+        const src = typeof c.source === 'object' ? c.source.id : c.source;
+        const tgt = typeof c.target === 'object' ? c.target.id : c.target;
+        const key = `${src}->${tgt}`;
+        if (!linkSet.has(key) && nodeIds.has(src) && nodeIds.has(tgt)) {
+          linkSet.add(key);
+          allLinks.push({ source: src, target: tgt, predicted: c.predicted || false });
+        }
+      });
+      return { nodes: Array.from(nodeMap.values()), links: allLinks };
+    });
   }, []);
 
   // Time animation
@@ -410,12 +462,27 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
     const fontSize = Math.max(10 / globalScale, 2);
     const isHighlighted = highlightedIds.has(node.id);
     const isOnPath = pathIds.has(node.id);
-    const nodeR = isHighlighted ? Math.max(node.val || 3, 2) * 1.5 : Math.max(node.val || 3, 2);
-    const color = isOnPath ? '#f6e05e' : isHighlighted ? '#f56565' : getNodeColor(node);
+    const isSpawning = spawnIds.has(node.id);
 
-    // Glow effect
+    // Spawn animation: starts at 5x size and eases down to 1x over 2s
+    let spawnScale = 1;
+    if (isSpawning && node._spawnTime) {
+      const elapsed = (Date.now() - node._spawnTime) / 1000; // seconds
+      if (elapsed < 2) {
+        // Elastic ease-out: overshoot then settle
+        const t = Math.min(elapsed / 2, 1);
+        spawnScale = 1 + 4 * Math.pow(1 - t, 2) * Math.cos(t * Math.PI * 2);
+        spawnScale = Math.max(spawnScale, 1);
+      }
+    }
+
+    const baseR = Math.max(node.val || 3, 2);
+    const nodeR = (isHighlighted ? baseR * 1.5 : baseR) * spawnScale;
+    const color = isSpawning ? '#22d3ee' : isOnPath ? '#f6e05e' : isHighlighted ? '#f56565' : getNodeColor(node);
+
+    // Glow effect — extra glow for spawning nodes
     ctx.shadowColor = color;
-    ctx.shadowBlur = isHighlighted ? 20 : 8;
+    ctx.shadowBlur = isSpawning ? 30 * spawnScale : isHighlighted ? 20 : 8;
 
     // Node circle
     ctx.beginPath();
@@ -425,42 +492,60 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
 
     ctx.shadowBlur = 0;
 
+    // Spawn pulse rings
+    if (isSpawning && node._spawnTime) {
+      const elapsed = (Date.now() - node._spawnTime) / 1000;
+      if (elapsed < 2.5) {
+        // Expanding ring
+        const ringProgress = (elapsed % 0.8) / 0.8;
+        const ringR = nodeR + (20 / globalScale) * ringProgress;
+        const ringAlpha = 0.6 * (1 - ringProgress);
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, ringR, 0, 2 * Math.PI);
+        ctx.strokeStyle = `rgba(34, 211, 238, ${ringAlpha})`;
+        ctx.lineWidth = 2 / globalScale;
+        ctx.stroke();
+      }
+    }
+
     // Highlight ring
-    if (isHighlighted) {
+    if (isHighlighted && !isSpawning) {
       ctx.strokeStyle = isOnPath ? '#f6e05e' : '#f56565';
       ctx.lineWidth = 2 / globalScale;
       ctx.stroke();
     }
 
     // Border for on-chain
-    if (node.onChain && !isHighlighted) {
+    if (node.onChain && !isHighlighted && !isSpawning) {
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 1.5 / globalScale;
       ctx.stroke();
     }
 
     // Code indicator for papers with repos
-    if (node.githubRepo) {
+    if (node.githubRepo && !isSpawning) {
       ctx.font = `${Math.max(8 / globalScale, 3)}px Sans-Serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = 'rgba(255,255,255,0.9)';
       ctx.fillText('\u{2022}', node.x + nodeR + 3 / globalScale, node.y - nodeR);
-      // small bracket icon
       ctx.font = `bold ${Math.max(7 / globalScale, 2.5)}px monospace`;
       ctx.fillStyle = '#a78bfa';
       ctx.fillText('{ }', node.x + nodeR + 3 / globalScale, node.y - nodeR);
     }
 
-    // Label (when zoomed in OR highlighted)
-    if (globalScale > 1.5 || isHighlighted) {
-      ctx.font = `${isHighlighted ? Math.max(fontSize, 4) : fontSize}px Sans-Serif`;
+    // Label — always show for spawning nodes, otherwise when zoomed/highlighted
+    if (isSpawning || globalScale > 1.5 || isHighlighted) {
+      const labelFontSize = isSpawning
+        ? Math.max(fontSize * 1.5, 5)
+        : isHighlighted ? Math.max(fontSize, 4) : fontSize;
+      ctx.font = `${labelFontSize}px Sans-Serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillStyle = isHighlighted ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.85)';
+      ctx.fillStyle = isSpawning ? 'rgba(34, 211, 238, 1)' : isHighlighted ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.85)';
       ctx.fillText(label, node.x, node.y + nodeR + 2);
     }
-  }, [getNodeColor, highlightedIds, pathIds]);
+  }, [getNodeColor, highlightedIds, pathIds, spawnIds]);
 
   // Custom link rendering for predicted links
   const paintLink = useCallback((link, ctx) => {
@@ -544,79 +629,27 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
           <BrainCircuit className="mr-1 h-3.5 w-3.5" />
           GNN
         </Button>
+
+        {/* Add Papers — unified dropdown */}
         <Button
-          variant="outline"
+          ref={addBtnRef}
+          variant={showAddPanel ? 'default' : 'outline'}
           size="sm"
-          onClick={handleBulkImport}
-          disabled={importing}
+          onClick={() => setShowAddPanel(!showAddPanel)}
           className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
         >
-          <Import className="mr-1 h-3.5 w-3.5" />
-          {importing ? 'Importing...' : 'Import'}
+          <Plus className="mr-1 h-3.5 w-3.5" />
+          Add
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            const fileInput = document.createElement('input');
-            fileInput.type = 'file';
-            fileInput.accept = '.json';
-            fileInput.onchange = (e) => {
-              const file = e.target.files[0];
-              if (!file) return;
-              const reader = new FileReader();
-              reader.onload = (ev) => {
-                try {
-                  const data = JSON.parse(ev.target.result);
-                  const papers = data.papers || data.nodes || [];
-                  const citations = data.citations || data.links || [];
-                  if (papers.length === 0) return;
-                  setGraphData(prev => {
-                    const nodeMap = new Map();
-                    prev.nodes.forEach(n => nodeMap.set(n.id, n));
-                    papers.forEach(p => {
-                      if (!nodeMap.has(p.id)) {
-                        nodeMap.set(p.id, {
-                          ...p,
-                          paperId: p.paperId || p.id,
-                          val: Math.max(2, Math.log10((p.citationCount || 1) + 1) * 3),
-                          source: p.source || 'imported',
-                        });
-                      }
-                    });
-                    const linkSet = new Set();
-                    const allLinks = [];
-                    prev.links.forEach(l => {
-                      const src = typeof l.source === 'object' ? l.source.id : l.source;
-                      const tgt = typeof l.target === 'object' ? l.target.id : l.target;
-                      linkSet.add(`${src}->${tgt}`);
-                      allLinks.push(l);
-                    });
-                    const nodeIds = new Set(nodeMap.keys());
-                    citations.forEach(c => {
-                      const src = typeof c.source === 'object' ? c.source.id : c.source;
-                      const tgt = typeof c.target === 'object' ? c.target.id : c.target;
-                      const key = `${src}->${tgt}`;
-                      if (!linkSet.has(key) && nodeIds.has(src) && nodeIds.has(tgt)) {
-                        linkSet.add(key);
-                        allLinks.push({ source: src, target: tgt, predicted: c.predicted || false });
-                      }
-                    });
-                    return { nodes: Array.from(nodeMap.values()), links: allLinks };
-                  });
-                } catch (err) {
-                  console.error('Import failed:', err);
-                }
-              };
-              reader.readAsText(file);
-            };
-            fileInput.click();
-          }}
-          className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
-        >
-          <Upload className="mr-1 h-3.5 w-3.5" />
-          Load
-        </Button>
+        <AddPapersPanel
+          isOpen={showAddPanel}
+          onClose={() => setShowAddPanel(false)}
+          onAddPaper={handleAddPaper}
+          onImportJSON={handleImportPapers}
+          onImportBulk={handleImportPapers}
+          anchorRef={addBtnRef}
+        />
+
         <Button
           variant="outline"
           size="sm"
@@ -896,15 +929,20 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
         </div>
       </div>
 
-      {/* Research Agent Panel (below graph) */}
+      {/* Research Agent Sidebar */}
       {showAgent && (
-        <div className="border-t border-neutral-200 bg-white flex-shrink-0" style={{ height: '40vh' }}>
-          <ResearchAgent
-            graphData={graphData}
-            onGraphAction={handleGraphAction}
-            onAddPapers={(papers) => setGraphData(prev => buildGraphFromPapers(papers, prev))}
-            onClose={() => setShowAgent(false)}
-          />
+        <div className="fixed inset-0 z-[999] bg-black/20" onClick={() => setShowAgent(false)}>
+          <div
+            className="absolute right-0 top-0 h-full w-[400px] max-w-[90vw] bg-white border-l border-neutral-200 shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <ResearchAgent
+              graphData={graphData}
+              onGraphAction={handleGraphAction}
+              onAddPapers={(papers) => setGraphData(prev => buildGraphFromPapers(papers, prev))}
+              onClose={() => setShowAgent(false)}
+            />
+          </div>
         </div>
       )}
 

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Settings, X, Send, ArrowUp, Search, Download, ExternalLink, Eye, BookOpen } from 'lucide-react';
+import { Settings, X, ArrowUp, ExternalLink, Eye, BookOpen } from 'lucide-react';
 import { buildSystemPrompt, assembleContext, findCitationPath } from '../utils/ragRetrieval';
 import { PROVIDERS, detectProvider, callClaude, callOpenAI } from '../utils/llm';
 import { searchPapers, buildGraphFromPapers } from '../utils/semanticScholar';
@@ -12,60 +12,100 @@ const API_URL_STORAGE = 'rg_llm_api_url';
 const PROVIDER_STORAGE = 'rg_llm_provider';
 const MODEL_STORAGE = 'rg_llm_model';
 
-function parseActions(text) {
+// ============================================================
+// Parse LLM output: extract [SEARCH:...] actions, strip IDs/markdown
+// ============================================================
+
+function parseResponse(text) {
   const actions = [];
-  let cleaned = text.replace(/\[HIGHLIGHT:([\w,]+)\]/g, (_, ids) => {
-    actions.push({ type: 'highlight', ids: ids.split(',').map(s => s.trim()) });
-    return '';
-  }).replace(/\[ZOOM:([\w]+)\]/g, (_, id) => {
-    actions.push({ type: 'zoom', id: id.trim() });
-    return '';
-  }).replace(/\[PATH:([\w]+),([\w]+)\]/g, (_, id1, id2) => {
-    actions.push({ type: 'path', from: id1.trim(), to: id2.trim() });
-    return '';
-  }).replace(/\[SEARCH:([^\]]+)\]/g, (_, query) => {
-    actions.push({ type: 'search', query: query.trim() });
-    return '';
-  });
+  let cleaned = text.replace(/\[HIGHLIGHT:([\w,]+)\]/g, () => '')
+    .replace(/\[ZOOM:([\w]+)\]/g, () => '')
+    .replace(/\[PATH:([\w]+),([\w]+)\]/g, () => '')
+    .replace(/\[SEARCH:([^\]]+)\]/g, (_, query) => {
+      actions.push({ type: 'search', query: query.trim() });
+      return '';
+    });
 
-  // Strip stray paper IDs like /W3099252273 or W3099252273
+  // Strip stray IDs, markdown
   cleaned = cleaned.replace(/\/?W\d{5,}/g, '');
-
-  // Convert basic markdown to clean text
-  // Remove ## headers — keep the text
   cleaned = cleaned.replace(/^#{1,4}\s+/gm, '');
-  // Convert **bold** to just the text (we'll render clean prose)
   cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
-  // Convert *italic*
   cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
-  // Clean up multiple blank lines
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
-  // Clean up leading/trailing whitespace on lines
-  cleaned = cleaned.split('\n').map(l => l.trim()).join('\n');
+  cleaned = cleaned.split('\n').map(l => l.trim()).join('\n').trim();
 
-  return { text: cleaned.trim(), actions };
+  // Extract cited paper numbers [1], [2], [1,3], etc.
+  const citedSet = new Set();
+  const citationRegex = /\[(\d+(?:,\s*\d+)*)\]/g;
+  let match;
+  while ((match = citationRegex.exec(cleaned)) !== null) {
+    match[1].split(',').forEach(n => {
+      const num = parseInt(n.trim());
+      if (num > 0 && num <= 25) citedSet.add(num);
+    });
+  }
+
+  return { text: cleaned, actions, citedNumbers: Array.from(citedSet).sort((a, b) => a - b) };
 }
 
-const STARTERS = [
-  'What are the most influential papers in this graph?',
-  'Search for papers on quantum machine learning and add them to the graph',
-  'Trace the path from LSTMs to GPT-4',
-  'Find connections between biology and machine learning',
-  'Search for recent papers on protein folding with AlphaFold',
-];
+// ============================================================
+// Render text with clickable citation superscripts
+// ============================================================
 
-// Paper card component — Consensus AI inspired
-function PaperCard({ paper, onViewInGraph, rank }) {
+function CitedText({ text, onCitationClick }) {
+  // Split text into segments: regular text and [n] citations
+  const parts = [];
+  let lastIdx = 0;
+  const regex = /\[(\d+(?:,\s*\d+)*)\]/g;
+  let m;
+
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > lastIdx) {
+      parts.push({ type: 'text', content: text.slice(lastIdx, m.index) });
+    }
+    parts.push({ type: 'cite', numbers: m[1].split(',').map(n => parseInt(n.trim())) });
+    lastIdx = m.index + m[0].length;
+  }
+  if (lastIdx < text.length) {
+    parts.push({ type: 'text', content: text.slice(lastIdx) });
+  }
+
+  return (
+    <span>
+      {parts.map((part, i) => {
+        if (part.type === 'text') {
+          return <span key={i}>{part.content}</span>;
+        }
+        return (
+          <span key={i}>
+            {part.numbers.map((n, j) => (
+              <button
+                key={j}
+                onClick={() => onCitationClick(n)}
+                className="inline-flex items-center justify-center text-[10px] font-mono font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 rounded-full w-4 h-4 mx-0.5 align-super transition-colors cursor-pointer"
+                title={`Paper [${n}]`}
+              >
+                {n}
+              </button>
+            ))}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+// ============================================================
+// Compact paper citation card
+// ============================================================
+
+function CitationCard({ paper, number, onViewInGraph }) {
   const year = paper.year || '?';
   const citations = paper.citationCount || 0;
   const authors = (paper.authors || []).slice(0, 3).join(', ');
-  const moreAuthors = (paper.authors || []).length > 3 ? ` et al.` : '';
-  const fields = (paper.fieldsOfStudy || []).slice(0, 2);
-  const relevance = Math.round((paper.relevanceScore || 0) * 100);
+  const moreAuthors = (paper.authors || []).length > 3 ? ' et al.' : '';
   const doi = paper.doi;
   const s2Id = paper.paperId || paper.id;
-
-  // S2 link: prefer DOI, fallback to S2 paper ID
   const s2Url = doi
     ? `https://doi.org/${doi}`
     : s2Id && !String(s2Id).startsWith('W')
@@ -73,95 +113,63 @@ function PaperCard({ paper, onViewInGraph, rank }) {
       : null;
 
   return (
-    <div className="group border border-neutral-200 bg-white hover:border-neutral-300 hover:shadow-sm transition-all duration-150 mb-2">
-      <div className="flex items-start gap-3 p-3">
-        {/* Left accent bar */}
-        <div className="w-1 self-stretch bg-neutral-900 rounded-full flex-shrink-0" />
-
-        <div className="flex-1 min-w-0">
-          {/* Title row */}
-          <div className="flex items-start justify-between gap-2">
-            <h4 className="text-sm font-medium text-neutral-900 leading-snug line-clamp-2">
-              {paper.title}
-            </h4>
-            <div className="flex items-center gap-2 flex-shrink-0 text-xs text-neutral-500">
-              <span>{year}</span>
-              <span className="flex items-center gap-0.5">
-                {citations.toLocaleString()}
-                <BookOpen className="h-3 w-3" />
-              </span>
-            </div>
-          </div>
-
-          {/* Authors */}
-          {authors && (
-            <p className="text-xs text-neutral-500 mt-0.5 truncate">
-              {authors}{moreAuthors}
-            </p>
-          )}
-
-          {/* Relevance bar */}
-          {relevance > 0 && (
-            <div className="flex items-center gap-2 mt-2">
-              <div className="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-300"
-                  style={{
-                    width: `${relevance}%`,
-                    background: relevance > 70
-                      ? '#16a34a'
-                      : relevance > 40
-                        ? '#ca8a04'
-                        : '#9ca3af',
-                  }}
-                />
-              </div>
-              <span className="text-[10px] font-mono text-neutral-400 w-8 text-right">
-                {relevance}%
-              </span>
-            </div>
-          )}
-
-          {/* Fields + actions row */}
-          <div className="flex items-center justify-between mt-2">
-            <div className="flex items-center gap-1 flex-wrap">
-              {fields.map((f, i) => (
-                <span
-                  key={i}
-                  className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 bg-neutral-100 px-1.5 py-0.5"
-                >
-                  {f}
-                </span>
-              ))}
-            </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {onViewInGraph && (
-                <button
-                  onClick={() => onViewInGraph(paper)}
-                  className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 hover:text-neutral-900 flex items-center gap-0.5 px-1.5 py-0.5 hover:bg-neutral-100 transition-colors"
-                >
-                  <Eye className="h-3 w-3" />
-                  View
-                </button>
-              )}
-              {s2Url && (
-                <a
-                  href={s2Url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 hover:text-neutral-900 flex items-center gap-0.5 px-1.5 py-0.5 hover:bg-neutral-100 transition-colors"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  Paper
-                </a>
-              )}
-            </div>
+    <div className="flex items-start gap-2 py-1.5 group">
+      <span className="flex-shrink-0 inline-flex items-center justify-center text-[10px] font-mono font-bold text-blue-600 bg-blue-50 rounded-full w-4 h-4 mt-0.5">
+        {number}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start gap-1.5">
+          <span className="text-xs font-medium text-neutral-800 leading-snug line-clamp-1 flex-1">
+            {paper.title}
+          </span>
+          <span className="text-[10px] text-neutral-400 flex-shrink-0 whitespace-nowrap">
+            {year} &middot; {citations.toLocaleString()} cit.
+          </span>
+        </div>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-[10px] text-neutral-400 truncate flex-1">
+            {authors}{moreAuthors}
+          </span>
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {onViewInGraph && (
+              <button
+                onClick={() => onViewInGraph(paper)}
+                className="text-[9px] font-mono text-neutral-400 hover:text-neutral-900 flex items-center gap-0.5"
+              >
+                <Eye className="h-2.5 w-2.5" />
+              </button>
+            )}
+            {s2Url && (
+              <a
+                href={s2Url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[9px] font-mono text-neutral-400 hover:text-neutral-900 flex items-center gap-0.5"
+              >
+                <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            )}
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+// ============================================================
+// Starter prompts
+// ============================================================
+
+const STARTERS = [
+  'What are the most influential papers here?',
+  'How did transformers change NLP?',
+  'Find connections between biology and ML',
+  'Search for papers on protein folding',
+];
+
+// ============================================================
+// Main component
+// ============================================================
 
 function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   const [messages, setMessages] = useState([]);
@@ -222,7 +230,12 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   }, [apiUrl, provider]);
 
   const handleViewInGraph = useCallback((paper) => {
-    if (onGraphAction) {
+    if (onGraphAction) onGraphAction({ type: 'zoom', id: paper.id });
+  }, [onGraphAction]);
+
+  const handleCitationClick = useCallback((number, papers) => {
+    const paper = papers[number - 1];
+    if (paper && onGraphAction) {
       onGraphAction({ type: 'zoom', id: paper.id });
     }
   }, [onGraphAction]);
@@ -230,21 +243,20 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   const sendMessage = useCallback(async (userMessage) => {
     if (!userMessage.trim() || !apiKey || loading) return;
 
-    const newUserMsg = { role: 'user', content: userMessage };
-    setMessages(prev => [...prev, newUserMsg]);
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setInput('');
     setLoading(true);
 
     try {
       const { paperContext, relevantPaperIds, contextPapers } = assembleContext(userMessage, graphData);
       if (relevantPaperIds.length > 0 && onGraphAction) {
-        onGraphAction({ type: 'highlight', ids: relevantPaperIds.slice(0, 10) });
+        onGraphAction({ type: 'highlight', ids: relevantPaperIds.slice(0, 8) });
       }
 
       const systemPrompt = buildSystemPrompt(graphData);
-      const contextMsg = paperContext ? `\n\nRELEVANT PAPERS FROM THE GRAPH:\n${paperContext}` : '';
+      const contextMsg = paperContext ? `\n\nRELEVANT PAPERS:\n${paperContext}` : '';
       const chatMessages = [
-        ...messages.slice(-6).map(m => ({ role: m.role, content: m.content })),
+        ...messages.slice(-4).map(m => ({ role: m.role, content: m.content })),
         { role: 'user', content: userMessage + contextMsg },
       ];
 
@@ -258,9 +270,9 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
         rawContent = await callOpenAI(apiKey, effectiveModel, systemPrompt, chatMessages, effectiveUrl);
       }
 
-      const { text: cleanContent, actions } = parseActions(rawContent);
+      const { text: cleanContent, actions, citedNumbers } = parseResponse(rawContent);
 
-      // Handle search actions — fetch from S2 and add to graph
+      // Handle search actions
       for (const action of actions) {
         if (action.type === 'search' && onAddPapers) {
           setSearchingPapers(true);
@@ -268,7 +280,6 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
             const results = await searchPapers(action.query, 10);
             if (results.length > 0) {
               onAddPapers(results);
-              // Auto-highlight newly added papers
               const newIds = results.map(r => r.paperId || r.id);
               if (onGraphAction) onGraphAction({ type: 'highlight', ids: newIds });
             }
@@ -276,25 +287,26 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
             console.error('Search action failed:', e);
           }
           setSearchingPapers(false);
-        } else if (action.type === 'path') {
-          const path = findCitationPath(action.from, action.to, graphData);
-          if (path && onGraphAction) onGraphAction({ type: 'path', ids: path });
-        } else if (onGraphAction) {
-          onGraphAction(action);
         }
       }
+
+      // Only include papers that were actually cited
+      const citedPapers = citedNumbers
+        .map(n => contextPapers[n - 1])
+        .filter(Boolean);
 
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: cleanContent,
         actions,
-        paperIds: relevantPaperIds.slice(0, 8),
-        papers: contextPapers.slice(0, 8),
+        papers: contextPapers.slice(0, 15), // all context papers for citation lookup
+        citedPapers,
+        citedNumbers,
       }]);
     } catch (err) {
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Error: ${err.message}\n\nMake sure your API key is valid.`,
+        content: `Error: ${err.message}. Check your API key.`,
         isError: true,
       }]);
     }
@@ -307,44 +319,25 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
     sendMessage(input);
   };
 
-  const renderTextContent = (text) => {
-    // Split into paragraphs and render clean prose
-    const paragraphs = text.split('\n\n').filter(p => p.trim());
-
-    return paragraphs.map((para, i) => {
-      const trimmed = para.trim();
-
-      // Detect bullet lists (lines starting with - )
-      const lines = trimmed.split('\n');
-      const isList = lines.every(l => l.startsWith('- ') || l.trim() === '');
-
-      if (isList) {
-        return (
-          <ul key={i} className="list-none space-y-1 my-2">
-            {lines.filter(l => l.startsWith('- ')).map((l, j) => (
-              <li key={j} className="flex items-start gap-2 text-sm text-neutral-700 leading-relaxed">
-                <span className="text-neutral-300 mt-1.5">-</span>
-                <span>{l.slice(2)}</span>
-              </li>
-            ))}
-          </ul>
-        );
-      }
-
-      // Regular paragraph
-      return (
-        <p key={i} className="text-sm text-neutral-700 leading-relaxed mb-2 last:mb-0">
-          {trimmed}
-        </p>
-      );
-    });
-  };
+  // ============================================================
+  // Render messages
+  // ============================================================
 
   const renderMessage = (msg, idx) => {
     if (msg.role === 'user') {
       return (
-        <div key={idx} className="flex justify-end mb-4">
-          <div className="bg-neutral-900 text-white text-sm px-4 py-2.5 max-w-[85%] rounded-lg">
+        <div key={idx} className="flex justify-end mb-3">
+          <div className="bg-neutral-900 text-white text-sm px-3.5 py-2 max-w-[85%] rounded-lg">
+            {msg.content}
+          </div>
+        </div>
+      );
+    }
+
+    if (msg.isError) {
+      return (
+        <div key={idx} className="mb-3">
+          <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 rounded">
             {msg.content}
           </div>
         </div>
@@ -353,55 +346,35 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
 
     return (
       <div key={idx} className="mb-4">
-        {/* Text content */}
-        <div className={`px-1 ${msg.isError ? 'text-red-600' : ''}`}>
-          {msg.isError ? (
-            <div className="bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-2.5 rounded-lg">
-              {msg.content}
-            </div>
-          ) : (
-            renderTextContent(msg.content)
-          )}
+        {/* Answer text with inline citations */}
+        <div className="text-sm text-neutral-800 leading-relaxed">
+          <CitedText
+            text={msg.content}
+            onCitationClick={(n) => handleCitationClick(n, msg.papers || [])}
+          />
         </div>
 
-        {/* Paper cards */}
-        {msg.papers && msg.papers.length > 0 && (
-          <div className="mt-3">
-            <div className="flex items-center gap-2 mb-2 px-1">
-              <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">
-                Relevant papers
-              </span>
-              <span className="text-[10px] text-neutral-300">
-                {msg.papers.length} found
-              </span>
-            </div>
-            {msg.papers.map((paper, i) => (
-              <PaperCard
+        {/* Cited papers — only ones actually referenced */}
+        {msg.citedPapers && msg.citedPapers.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-neutral-100">
+            {msg.citedPapers.map((paper, i) => (
+              <CitationCard
                 key={paper.id || i}
                 paper={paper}
-                rank={i + 1}
+                number={msg.citedNumbers[i]}
                 onViewInGraph={handleViewInGraph}
               />
             ))}
           </div>
         )}
 
-        {/* Action buttons */}
+        {/* Search action badges */}
         {msg.actions && msg.actions.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2 px-1">
-            {msg.actions.map((action, i) => (
-              <Button
-                key={i}
-                variant="outline"
-                size="sm"
-                className="font-mono text-[10px] uppercase tracking-widest h-6 px-2"
-                onClick={() => onGraphAction && onGraphAction(action)}
-              >
-                {action.type === 'highlight' && `Show ${action.ids.length} papers`}
-                {action.type === 'zoom' && 'Zoom to paper'}
-                {action.type === 'path' && 'Show path'}
-                {action.type === 'search' && `Added: "${action.query}"`}
-              </Button>
+          <div className="flex flex-wrap gap-1 mt-2">
+            {msg.actions.filter(a => a.type === 'search').map((action, i) => (
+              <span key={i} className="text-[10px] font-mono text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                + {action.query}
+              </span>
             ))}
           </div>
         )}
@@ -409,7 +382,10 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
     );
   };
 
-  // No API key — setup
+  // ============================================================
+  // No API key — setup screen
+  // ============================================================
+
   if (!apiKey) {
     return (
       <div className="flex flex-col h-full bg-white">
@@ -422,7 +398,7 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
           <h4 className="text-lg mb-2">Connect an LLM</h4>
           <p className="text-sm text-neutral-500 mb-6 max-w-xs">
-            Enter an API key to power the Research Navigator. Supports Claude, OpenAI, OpenRouter, and any compatible API.
+            Enter an API key to power the Research Navigator.
           </p>
           <div className="w-full max-w-xs space-y-3">
             <div className="space-y-1">
@@ -449,24 +425,14 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
             {provider === 'custom' && (
               <div className="space-y-1">
                 <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">Endpoint</label>
-                <Input
-                  type="text"
-                  placeholder="https://api.example.com/v1/chat/completions"
-                  value={apiUrl}
-                  onChange={(e) => saveApiUrl(e.target.value)}
-                />
+                <Input type="text" placeholder="https://..." value={apiUrl} onChange={(e) => saveApiUrl(e.target.value)} />
               </div>
             )}
             <div className="space-y-1">
               <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">
                 Model <span className="normal-case tracking-normal">(optional)</span>
               </label>
-              <Input
-                type="text"
-                placeholder={PROVIDERS[provider]?.defaultModel || 'model name'}
-                value={model}
-                onChange={(e) => saveModel(e.target.value)}
-              />
+              <Input type="text" placeholder={PROVIDERS[provider]?.defaultModel || 'model'} value={model} onChange={(e) => saveModel(e.target.value)} />
             </div>
             <Button
               className="w-full bg-neutral-900 text-white hover:bg-neutral-800 font-mono text-xs uppercase tracking-widest"
@@ -481,74 +447,69 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
     );
   }
 
+  // ============================================================
+  // Main chat UI
+  // ============================================================
+
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-neutral-200">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-neutral-200">
         <div className="flex items-center gap-2">
           <span className="font-mono text-xs font-bold uppercase tracking-widest">Navigator</span>
-          <Badge variant="outline" className="font-mono text-[10px]">{PROVIDERS[provider]?.label || provider}</Badge>
+          <Badge variant="outline" className="font-mono text-[9px] h-4">{PROVIDERS[provider]?.label || provider}</Badge>
         </div>
         <div className="flex items-center gap-1">
-          <button
-            className="text-neutral-400 hover:text-neutral-900 transition-colors p-1"
-            onClick={() => setShowSettings(!showSettings)}
-          >
-            <Settings className="h-4 w-4" />
+          <button className="text-neutral-400 hover:text-neutral-900 transition-colors p-1" onClick={() => setShowSettings(!showSettings)}>
+            <Settings className="h-3.5 w-3.5" />
           </button>
           <button className="text-neutral-400 hover:text-neutral-900 transition-colors p-1" onClick={onClose}>
-            <X className="h-4 w-4" />
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
 
       {/* Settings */}
       {showSettings && (
-        <div className="p-3 border-b border-neutral-200 bg-neutral-50 space-y-2">
+        <div className="p-2.5 border-b border-neutral-200 bg-neutral-50 space-y-1.5">
           <div className="flex items-center gap-2">
-            <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400 w-16">Provider</label>
-            <select
-              className="flex-1 h-7 border border-neutral-200 bg-white px-2 text-xs focus:outline-none"
-              value={provider}
-              onChange={(e) => saveProvider(e.target.value)}
-            >
-              {Object.entries(PROVIDERS).map(([key, p]) => (
-                <option key={key} value={key}>{p.label}</option>
-              ))}
+            <label className="font-mono text-[9px] uppercase tracking-widest text-neutral-400 w-14">Provider</label>
+            <select className="flex-1 h-6 border border-neutral-200 bg-white px-2 text-[11px] focus:outline-none" value={provider} onChange={(e) => saveProvider(e.target.value)}>
+              {Object.entries(PROVIDERS).map(([key, p]) => (<option key={key} value={key}>{p.label}</option>))}
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400 w-16">Key</label>
-            <Input type="password" value={apiKey} onChange={(e) => saveApiKey(e.target.value)} className="h-7 text-xs" />
+            <label className="font-mono text-[9px] uppercase tracking-widest text-neutral-400 w-14">Key</label>
+            <Input type="password" value={apiKey} onChange={(e) => saveApiKey(e.target.value)} className="h-6 text-[11px]" />
           </div>
           {provider === 'custom' && (
             <div className="flex items-center gap-2">
-              <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400 w-16">URL</label>
-              <Input type="text" value={apiUrl} onChange={(e) => saveApiUrl(e.target.value)} placeholder="https://..." className="h-7 text-xs" />
+              <label className="font-mono text-[9px] uppercase tracking-widest text-neutral-400 w-14">URL</label>
+              <Input type="text" value={apiUrl} onChange={(e) => saveApiUrl(e.target.value)} placeholder="https://..." className="h-6 text-[11px]" />
             </div>
           )}
           <div className="flex items-center gap-2">
-            <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400 w-16">Model</label>
-            <Input type="text" value={model} onChange={(e) => saveModel(e.target.value)} placeholder={PROVIDERS[provider]?.defaultModel || 'model'} className="h-7 text-xs" />
+            <label className="font-mono text-[9px] uppercase tracking-widest text-neutral-400 w-14">Model</label>
+            <Input type="text" value={model} onChange={(e) => saveModel(e.target.value)} placeholder={PROVIDERS[provider]?.defaultModel || 'model'} className="h-6 text-[11px]" />
           </div>
-          <div className="text-[10px] text-neutral-400 font-mono">
-            {graphData.nodes.length.toLocaleString()} papers, {graphData.links.length.toLocaleString()} citations | {getEffectiveModel()}
+          <div className="text-[9px] text-neutral-400 font-mono">
+            {graphData.nodes.length.toLocaleString()} papers &middot; {getEffectiveModel()}
           </div>
         </div>
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto px-3 py-3">
         {messages.length === 0 && (
-          <div className="text-center py-6">
-            <p className="text-sm text-neutral-500 mb-4">
-              Ask about the {graphData.nodes.length.toLocaleString()} papers in the knowledge graph.
+          <div className="py-8 text-center">
+            <p className="text-xs text-neutral-400 mb-3">
+              {graphData.nodes.length.toLocaleString()} papers loaded
             </p>
-            <div className="flex flex-wrap gap-1.5 justify-center">
+            <div className="flex flex-col gap-1.5 items-center">
               {STARTERS.map((q, i) => (
                 <button
                   key={i}
-                  className="text-xs text-neutral-500 border border-neutral-200 px-3 py-1.5 hover:border-neutral-400 hover:text-neutral-700 transition-colors rounded-full"
+                  className="text-xs text-neutral-500 border border-neutral-200 px-3 py-1 hover:border-neutral-400 hover:text-neutral-700 transition-colors rounded-full"
                   onClick={() => sendMessage(q)}
                 >
                   {q}
@@ -561,15 +522,13 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
         {messages.map((msg, idx) => renderMessage(msg, idx))}
 
         {loading && (
-          <div className="flex justify-start mb-3">
-            <div className="flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-400">
-              <div className="flex gap-1">
-                <span className="w-1.5 h-1.5 bg-neutral-300 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 bg-neutral-300 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1.5 h-1.5 bg-neutral-300 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-              {searchingPapers ? 'Searching Semantic Scholar...' : 'Thinking...'}
+          <div className="flex items-center gap-2 py-2 text-xs text-neutral-400">
+            <div className="flex gap-1">
+              <span className="w-1 h-1 bg-neutral-300 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-1 h-1 bg-neutral-300 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-1 h-1 bg-neutral-300 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
             </div>
+            {searchingPapers ? 'Searching...' : 'Thinking...'}
           </div>
         )}
 
@@ -577,23 +536,23 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
       </div>
 
       {/* Input */}
-      <form className="p-3 border-t border-neutral-200 flex gap-2" onSubmit={handleSubmit}>
+      <form className="px-3 py-2 border-t border-neutral-200 flex gap-2" onSubmit={handleSubmit}>
         <Input
           ref={inputRef}
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about the research landscape..."
+          placeholder="Ask about the research..."
           disabled={loading}
-          className="flex-1"
+          className="flex-1 h-8 text-sm"
         />
         <Button
           type="submit"
           size="icon"
-          className="bg-neutral-900 text-white hover:bg-neutral-800"
+          className="bg-neutral-900 text-white hover:bg-neutral-800 h-8 w-8"
           disabled={loading || !input.trim()}
         >
-          <ArrowUp className="h-4 w-4" />
+          <ArrowUp className="h-3.5 w-3.5" />
         </Button>
       </form>
     </div>
