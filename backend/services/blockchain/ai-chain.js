@@ -1,8 +1,9 @@
 class AIChain {
   constructor(opts = {}) {
     this.name = 'Plasma Testnet';
-    this.chainId = 7777;
-    this.rpcUrl = opts.rpcUrl || 'https://rpc-testnet.plasma.xyz';
+    this.chainId = 9746;
+    this.rpcUrl = opts.rpcUrl || process.env.PLASMA_RPC || 'https://testnet-rpc.plasma.to';
+    console.log('AIChain initializing with RPC:', this.rpcUrl);
     this.connected = false;
     this.blockNumber = null;
     this._connect();
@@ -19,7 +20,8 @@ class AIChain {
       const data = await res.json();
       this.blockNumber = parseInt(data.result, 16);
       this.connected = true;
-    } catch {
+    } catch (err) {
+      console.error('AIChain connection error:', err);
       this.connected = false;
     }
   }

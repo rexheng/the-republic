@@ -44,244 +44,214 @@ function PredictionMarket({ contracts, account }) {
   const [positions, setPositions] = useState(DEMO_POSITIONS);
   const [markets, setMarkets] = useState(DEMO_MARKETS);
 
+  const getUserPosition = (marketId) => positions.find(p => p.marketId === marketId) || null;
+
   const activeMarkets = markets.filter(m => !m.resolved);
   const resolvedMarkets = markets.filter(m => m.resolved);
   const filteredMarkets = filter === 'active' ? activeMarkets : resolvedMarkets;
   const totalVolume = markets.reduce((sum, m) => sum + m.yesShares + m.noShares, 0);
   const totalParticipants = markets.reduce((sum, m) => sum + m.totalParticipants, 0);
 
-  const getTimeRemaining = (endTime) => {
-    const diff = endTime - Date.now();
-    if (diff <= 0) return 'Ended';
-    const days = Math.floor(diff / 86400000);
-    if (days > 0) return `${days}d remaining`;
-    const hours = Math.floor(diff / 3600000);
-    return `${hours}h remaining`;
-  };
-
-  const placeBet = async (market) => {
-    const shares = parseFloat(betShares);
-    if (!shares || shares <= 0) return;
-    const isYes = betSide === 'yes';
-
-    if (contracts.predictionMarket && contracts.researchToken) {
-      try {
-        const weiShares = ethers.parseEther(betShares);
-        const weiCost = ethers.parseEther(String(Math.ceil(lmsrCost(market.yesShares, market.noShares, market.b, shares, isYes))));
-        const approveTx = await contracts.researchToken.approve(await contracts.predictionMarket.getAddress(), weiCost);
-        await approveTx.wait();
-        const tx = isYes
-          ? await contracts.predictionMarket.buyYes(market.id, weiShares)
-          : await contracts.predictionMarket.buyNo(market.id, weiShares);
-        await tx.wait();
-      } catch (error) {
-        console.error('On-chain bet failed:', error);
-        return;
-      }
-    }
-
-    setMarkets(prev => prev.map(m => {
-      if (m.id !== market.id) return m;
-      return {
-        ...m,
-        yesShares: isYes ? m.yesShares + shares : m.yesShares,
-        noShares: !isYes ? m.noShares + shares : m.noShares,
-        totalParticipants: m.totalParticipants + 1,
-      };
-    }));
-    setPositions(prev => [...prev, { marketId: market.id, side: betSide, shares, timestamp: Date.now() }]);
-    setExpandedBet(null);
-    setBetShares('100');
-  };
-
-  const claimPayout = async (market) => {
-    if (contracts.predictionMarket) {
-      try { const tx = await contracts.predictionMarket.claimWinnings(market.id); await tx.wait(); } catch (error) { console.error('Claim failed:', error); }
-    }
-    setPositions(prev => prev.filter(p => p.marketId !== market.id));
-  };
-
-  const getUserPosition = (marketId) => positions.find(p => p.marketId === marketId);
-
   return (
-    <div>
-      <FadeIn>
-        <span className="section-label mb-2 block">Markets</span>
-        <h2 className="section-title mb-2">LMSR Prediction Markets</h2>
-        <p className="body-text text-sm mb-8">
-          Logarithmic Market Scoring Rule markets for paper replication outcomes.
-          Dynamic pricing ensures infinite liquidity and proper probability estimation.
-        </p>
-      </FadeIn>
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      <div className="lg:col-span-3">
+        <FadeIn>
+          <span className="section-label mb-2 block text-neutral-400">Main Track: Prediction Markets & DeFi</span>
+          <h2 className="section-title mb-2 italic underline decoration-neutral-200 underline-offset-8">Knowledge Exchange Terminal</h2>
+          <p className="body-text text-sm mb-8 font-light max-w-2xl">
+            Logarithmic Market Scoring Rule (LMSR) engine providing instant liquidity for research verification. 
+            Trade truth probabilities on Flare & Plasma settlement rails.
+          </p>
+        </FadeIn>
 
-      {/* Stats */}
-      <FadeIn delay={0.1}>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          {[
-            { value: activeMarkets.length, label: 'Active' },
-            { value: `${(totalVolume / 1000).toFixed(1)}k`, label: 'Total Volume' },
-            { value: totalParticipants, label: 'Participants' },
-            { value: resolvedMarkets.length, label: 'Resolved' },
-          ].map((s, i) => (
-            <div key={i} className="border border-neutral-200 p-4">
-              <div className="text-2xl font-light">{s.value}</div>
-              <div className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">{s.label}</div>
+        {/* Stats */}
+        <FadeIn delay={0.1}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-neutral-200 border border-neutral-200 mb-8 overflow-hidden">
+            {[
+              { value: activeMarkets.length, label: 'Active Pairs' },
+              { value: `${(totalVolume / 1000).toFixed(1)}k`, label: 'Trading Volume' },
+              { value: totalParticipants, label: 'LPs / Traders' },
+              { value: resolvedMarkets.length, label: 'Settled' },
+            ].map((s, i) => (
+              <div key={i} className="bg-white p-4">
+                <div className="text-xl font-light tabular-nums">{s.value}</div>
+                <div className="font-mono text-[9px] uppercase tracking-widest text-neutral-400">{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </FadeIn>
+
+        {/* Filter */}
+        <div className="flex gap-1 border-b border-neutral-100 mb-6">
+          {['active', 'resolved'].map(f => (
+            <button
+              key={f}
+              className={`px-4 py-2 font-mono text-[10px] uppercase tracking-widest transition-all ${filter === f ? 'text-neutral-900 border-b-2 border-neutral-900 -mb-px' : 'text-neutral-400 hover:text-neutral-600'}`}
+              onClick={() => setFilter(f)}
+            >
+              {f.toUpperCase()}
+            </button>
+          ))}
+        </div>
+
+        {/* Markets */}
+        <div className="space-y-4">
+          {filteredMarkets.map((market, i) => {
+            const yesPrice = lmsrYesPrice(market.yesShares, market.noShares, market.b);
+            const noPrice = 1 - yesPrice;
+            const yesPercent = Math.round(yesPrice * 100);
+            const noPercent = 100 - yesPercent;
+            const userPos = getUserPosition(market.id);
+            const isExpanded = expandedBet === market.id;
+
+            return (
+              <FadeIn key={market.id} delay={0.05 * i}>
+                <div className="border border-neutral-100 p-6 hover:bg-neutral-50/50 transition-all cursor-crosshair group relative">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex flex-col">
+                      <span className="font-mono text-[9px] uppercase tracking-tighter text-neutral-400 mb-1">{market.paperTitle}</span>
+                      <h3 className="text-lg font-medium leading-snug group-hover:text-neutral-900 transition-colors">{market.question}</h3>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <Badge variant="outline" className="text-[9px] font-mono rounded-none border-neutral-300">LP_POOL_ID: {market.id}</Badge>
+                      <div className="text-[10px] font-mono text-neutral-400 italic">ENDS: {new Date(market.endTime).toLocaleDateString()}</div>
+                    </div>
+                  </div>
+
+                  {/* Pricing Depth Visual */}
+                  <div className="grid grid-cols-2 gap-px bg-neutral-100 border border-neutral-100 mb-6">
+                    <div className="bg-white p-3">
+                      <div className="flex justify-between items-end mb-1">
+                        <span className="font-mono text-[9px] text-green-600 font-bold uppercase">BID_YES</span>
+                        <span className="text-xl font-light tabular-nums text-green-700">{yesPrice.toFixed(4)}</span>
+                      </div>
+                      <div className="h-1 bg-green-50 w-full">
+                        <div className="h-full bg-green-500" style={{ width: `${yesPercent}%` }} />
+                      </div>
+                    </div>
+                    <div className="bg-white p-3">
+                      <div className="flex justify-between items-end mb-1">
+                        <span className="font-mono text-[9px] text-red-600 font-bold uppercase">ASK_NO</span>
+                        <span className="text-xl font-light tabular-nums text-red-700">{noPrice.toFixed(4)}</span>
+                      </div>
+                      <div className="h-1 bg-red-50 w-full flex justify-end">
+                        <div className="h-full bg-red-500" style={{ width: `${noPercent}%` }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-6 text-[10px] text-neutral-400 font-mono mb-6 uppercase tracking-wider">
+                    <div className="flex flex-col">
+                      <span className="text-[8px] text-neutral-300">Volume</span>
+                      <span>{(market.yesShares + market.noShares).toLocaleString()} RESEARCH</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[8px] text-neutral-300">Liquidity</span>
+                      <span>{market.b} (LMSR)</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[8px] text-neutral-300">Settlement</span>
+                      <span className="text-blue-500">PLASMA_USDC</span>
+                    </div>
+                  </div>
+
+                  {userPos && (
+                    <div className={`p-4 mb-4 font-mono text-xs flex justify-between items-center ${userPos.side === 'yes' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                      <div>
+                        <span className="opacity-60 mr-2">POSITION:</span>
+                        <span className="font-bold">{userPos.side.toUpperCase()} — {userPos.shares} SHARES</span>
+                      </div>
+                      {market.resolved && ((market.outcome && userPos.side === 'yes') || (!market.outcome && userPos.side === 'no')) && (
+                        <Button className="h-7 px-4 bg-neutral-900 text-white text-[10px] rounded-none uppercase" onClick={() => claimPayout(market)}>Settle Payout</Button>
+                      )}
+                    </div>
+                  )}
+
+                  {!market.resolved && !userPos && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="font-mono text-[10px] uppercase tracking-widest h-10 px-8 rounded-none border-neutral-900 hover:bg-neutral-900 hover:text-white transition-all"
+                      onClick={() => setExpandedBet(isExpanded ? null : market.id)}
+                    >
+                      {isExpanded ? 'Cancel Transaction' : 'Open Position'}
+                    </Button>
+                  )}
+
+                  {isExpanded && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: -10 }} 
+                      animate={{ opacity: 1, y: 0 }}
+                      className="mt-6 p-6 border border-neutral-900 bg-neutral-50 space-y-4"
+                    >
+                      <div className="flex gap-4">
+                        <button
+                          className={`flex-1 py-3 font-mono text-xs border ${betSide === 'yes' ? 'bg-green-700 text-white border-green-700' : 'bg-white border-neutral-200 text-neutral-400'}`}
+                          onClick={() => setBetSide('yes')}
+                        >BUY YES</button>
+                        <button
+                          className={`flex-1 py-3 font-mono text-xs border ${betSide === 'no' ? 'bg-red-700 text-white border-red-700' : 'bg-white border-neutral-200 text-neutral-400'}`}
+                          onClick={() => setBetSide('no')}
+                        >BUY NO</button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="font-mono text-[9px] uppercase text-neutral-400">Amount (Shares)</label>
+                          <Input
+                            type="number"
+                            value={betShares}
+                            onChange={(e) => setBetShares(e.target.value)}
+                            placeholder="0.00"
+                            className="h-10 rounded-none font-mono text-sm"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="font-mono text-[9px] uppercase text-neutral-400">Estimated Cost</label>
+                          <div className="h-10 flex items-center px-3 bg-white border border-neutral-200 font-mono text-sm">
+                            {lmsrCost(market.yesShares, market.noShares, market.b, parseFloat(betShares) || 0, betSide === 'yes').toFixed(2)} RES
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-[10px] font-mono text-neutral-500 uppercase tracking-tight flex justify-between">
+                        <span>Price per share: {(betSide === 'yes' ? yesPrice : noPrice).toFixed(6)}</span>
+                        <span>Slippage: {(Math.random() * 0.05).toFixed(3)}%</span>
+                      </div>
+                      <Button
+                        className="w-full bg-neutral-900 text-white hover:bg-neutral-800 h-12 rounded-none font-mono text-xs uppercase tracking-widest"
+                        onClick={() => placeBet(market)}
+                      >
+                        Execute Exchange
+                      </Button>
+                    </motion.div>
+                  )}
+                </div>
+              </FadeIn>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="lg:col-span-1 border-l border-neutral-100 pl-8 hidden lg:block">
+        <h4 className="font-mono text-[10px] uppercase tracking-widest text-neutral-400 mb-6 underline underline-offset-4">Recent Activity</h4>
+        <div className="space-y-6">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="flex flex-col gap-1 border-b border-neutral-50 pb-4">
+              <div className="flex justify-between items-center text-[10px] font-mono">
+                <span className={i % 3 === 0 ? 'text-green-600' : 'text-red-600'}>{i % 3 === 0 ? 'BUY_YES' : 'BUY_NO'}</span>
+                <span className="text-neutral-300">0.40{i} ETH</span>
+              </div>
+              <div className="text-[11px] font-light text-neutral-600 line-clamp-1 italic">
+                {DEMO_MARKETS[i % 5].question}
+              </div>
+              <div className="text-[8px] font-mono text-neutral-300 uppercase italic">T-{i+2} mins ago</div>
             </div>
           ))}
         </div>
-      </FadeIn>
-
-      {/* Filter */}
-      <div className="flex gap-1 border-b border-neutral-200 mb-6">
-        {['active', 'resolved'].map(f => (
-          <button
-            key={f}
-            className={`px-4 py-2 font-mono text-xs uppercase tracking-widest transition-colors ${filter === f ? 'text-neutral-900 border-b-2 border-neutral-900 -mb-px' : 'text-neutral-400 hover:text-neutral-600'}`}
-            onClick={() => setFilter(f)}
-          >
-            {f} ({f === 'active' ? activeMarkets.length : resolvedMarkets.length})
-          </button>
-        ))}
+        
+        <div className="mt-12 p-4 bg-neutral-50 border border-neutral-100 italic text-[11px] text-neutral-500 leading-relaxed">
+          <strong>Linguistic Forensics Note:</strong> Markets for papers flagged by Warrior agents are subject to higher collateral requirements.
+        </div>
       </div>
-
-      {/* Markets */}
-      <div className="space-y-4">
-        {filteredMarkets.map((market, i) => {
-          const yesPrice = lmsrYesPrice(market.yesShares, market.noShares, market.b);
-          const noPrice = 1 - yesPrice;
-          const yesPercent = Math.round(yesPrice * 100);
-          const noPercent = 100 - yesPercent;
-          const userPos = getUserPosition(market.id);
-          const isExpanded = expandedBet === market.id;
-
-          return (
-            <FadeIn key={market.id} delay={0.05 * i}>
-              <div className="border border-neutral-200 p-6 hover:border-neutral-400 transition-colors">
-                <div className="flex items-start justify-between mb-2">
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">{market.paperTitle}</span>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-[9px] font-mono">LMSR b={market.b}</Badge>
-                    {market.resolved && (
-                      <Badge variant={market.outcome ? 'success' : 'destructive'}>{market.outcome ? 'YES' : 'NO'}</Badge>
-                    )}
-                  </div>
-                </div>
-
-                <p className="text-base mb-4">{market.question}</p>
-
-                {/* LMSR Price Bar */}
-                <div className="mb-3">
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-green-700 font-mono">YES {yesPercent}% ({yesPrice.toFixed(3)})</span>
-                    <span className="text-red-700 font-mono">({noPrice.toFixed(3)}) {noPercent}% NO</span>
-                  </div>
-                  <div className="flex h-2 w-full overflow-hidden">
-                    <div className="bg-green-200 transition-all" style={{ width: `${yesPercent}%` }} />
-                    <div className="bg-red-200 transition-all" style={{ width: `${noPercent}%` }} />
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4 text-xs text-neutral-400 font-mono mb-4">
-                  <span>{market.yesShares + market.noShares} shares traded</span>
-                  <span>{market.totalParticipants} participants</span>
-                  <span>{getTimeRemaining(market.endTime)}</span>
-                </div>
-
-                {userPos && (
-                  <div className={`border p-3 mb-3 text-sm ${userPos.side === 'yes' ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
-                    <span>Your position: {userPos.side.toUpperCase()} — {userPos.shares} shares</span>
-                    {market.resolved && ((market.outcome && userPos.side === 'yes') || (!market.outcome && userPos.side === 'no')) && (
-                      <Button variant="outline" size="sm" className="ml-3 font-mono text-[10px] uppercase" onClick={() => claimPayout(market)}>Claim</Button>
-                    )}
-                  </div>
-                )}
-
-                {!market.resolved && !userPos && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="font-mono text-[10px] uppercase tracking-widest"
-                    onClick={() => setExpandedBet(isExpanded ? null : market.id)}
-                  >
-                    {isExpanded ? 'Cancel' : 'Buy Shares'}
-                  </Button>
-                )}
-
-                {isExpanded && (
-                  <div className="mt-4 border-t border-neutral-100 pt-4 space-y-3">
-                    <div className="flex gap-2">
-                      <Button
-                        variant={betSide === 'yes' ? 'default' : 'outline'}
-                        size="sm"
-                        className={`flex-1 font-mono text-xs ${betSide === 'yes' ? 'bg-green-700 hover:bg-green-800' : ''}`}
-                        onClick={() => setBetSide('yes')}
-                      >YES</Button>
-                      <Button
-                        variant={betSide === 'no' ? 'default' : 'outline'}
-                        size="sm"
-                        className={`flex-1 font-mono text-xs ${betSide === 'no' ? 'bg-red-700 hover:bg-red-800' : ''}`}
-                        onClick={() => setBetSide('no')}
-                      >NO</Button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        value={betShares}
-                        onChange={(e) => setBetShares(e.target.value)}
-                        placeholder="Shares"
-                        min="1"
-                        className="flex-1"
-                      />
-                      <span className="font-mono text-xs text-neutral-400">shares</span>
-                    </div>
-                    <div className="text-sm text-neutral-600">
-                      Cost: <strong>
-                        {lmsrCost(market.yesShares, market.noShares, market.b, parseFloat(betShares) || 0, betSide === 'yes').toFixed(2)} RESEARCH
-                      </strong>
-                      <span className="text-neutral-400 ml-2">
-                        (price per share: {(betSide === 'yes' ? yesPrice : noPrice).toFixed(4)})
-                      </span>
-                    </div>
-                    <Button
-                      className="w-full bg-neutral-900 text-white hover:bg-neutral-800 font-mono text-xs uppercase tracking-widest"
-                      onClick={() => placeBet(market)}
-                    >
-                      Buy {betSide.toUpperCase()} Shares
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </FadeIn>
-          );
-        })}
-      </div>
-
-      {/* Positions */}
-      {positions.length > 0 && (
-        <FadeIn delay={0.2}>
-          <div className="mt-12">
-            <span className="section-label mb-4 block">Your Positions</span>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {positions.map(pos => {
-                const market = markets.find(m => m.id === pos.marketId);
-                if (!market) return null;
-                return (
-                  <div key={pos.marketId} className="border border-neutral-200 p-4">
-                    <div className="font-mono text-[10px] uppercase tracking-widest text-neutral-400 mb-1">{market.paperTitle}</div>
-                    <div className="flex items-center gap-3 text-sm">
-                      <Badge variant={pos.side === 'yes' ? 'success' : 'destructive'}>{pos.side.toUpperCase()}</Badge>
-                      <span>{pos.shares} shares</span>
-                    </div>
-                    {market.resolved && ((market.outcome && pos.side === 'yes') || (!market.outcome && pos.side === 'no')) && (
-                      <Button variant="outline" size="sm" className="mt-2 font-mono text-[10px] uppercase" onClick={() => claimPayout(market)}>Claim Winnings</Button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </FadeIn>
-      )}
     </div>
   );
 }

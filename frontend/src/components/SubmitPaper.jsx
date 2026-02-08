@@ -23,7 +23,7 @@ function SubmitPaper({ contracts, account, importData }) {
         abstract: importData.abstract || prev.abstract,
         doi: importData.doi || prev.doi,
       }));
-      setMessage({ type: 'info', text: `Imported "${importData.title}" from Knowledge Graph.` });
+      setMessage({ type: 'info', text: `Paper data synchronized from Knowledge Graph.` });
     }
   }, [importData]);
 
@@ -60,12 +60,12 @@ function SubmitPaper({ contracts, account, importData }) {
 
     try {
       setLoading(true);
-      setMessage({ type: 'info', text: 'Preparing submission...' });
+      setMessage({ type: 'info', text: 'Preparing launch...' });
 
       const mockIpfsHash = formData.ipfsHash || 'Qm' + Math.random().toString(36).substring(7);
       const submissionFee = await contracts.researchGraph.submissionFeeUSD();
 
-      setMessage({ type: 'info', text: `Approving ${ethers.formatUnits(submissionFee, 6)} USDC...` });
+      setMessage({ type: 'info', text: `Authorizing ${ethers.formatUnits(submissionFee, 6)} USDC on Plasma...` });
 
       const approveTx = await contracts.usdc.approve(
         await contracts.researchGraph.getAddress(),
@@ -73,7 +73,7 @@ function SubmitPaper({ contracts, account, importData }) {
       );
       await approveTx.wait();
 
-      setMessage({ type: 'info', text: 'Submitting paper to blockchain...' });
+      setMessage({ type: 'info', text: 'Launching research to the Graph...' });
 
       const submitTx = await contracts.researchGraph.submitPaper(mockIpfsHash, formData.doi);
       const receipt = await submitTx.wait();
@@ -90,15 +90,15 @@ function SubmitPaper({ contracts, account, importData }) {
 
       setMessage({
         type: 'success',
-        text: `Paper submitted. ID: ${paperId}. Flare FDC verification initiated.`
+        text: `RESEARCH LAUNCHED. ID: ${paperId}. Verification markets are now OPEN.`
       });
 
       setFormData({ title: '', abstract: '', doi: '', ipfsHash: '' });
     } catch (error) {
-      console.error('Submission error:', error);
+      console.error('Launch error:', error);
       setMessage({
         type: 'error',
-        text: error.reason || error.message || 'Failed to submit paper'
+        text: error.reason || error.message || 'Failed to launch research'
       });
     } finally {
       setLoading(false);
@@ -106,21 +106,22 @@ function SubmitPaper({ contracts, account, importData }) {
   };
 
   return (
-    <div>
+    <div className="max-w-2xl mx-auto">
       <FadeIn>
-        <span className="section-label mb-2 block">Submit</span>
-        <h2 className="section-title mb-2">Submit Research Paper</h2>
-        <p className="body-text text-sm mb-8">
-          Submit your paper to the decentralized research graph. Requires a $50 USDC submission fee on Plasma.
+        <span className="section-label mb-2 block text-neutral-400">Main Track: New Consumer Primitives</span>
+        <h2 className="section-title mb-2 italic">Launch Research</h2>
+        <p className="body-text text-sm mb-8 font-light italic text-neutral-500">
+          Transform your knowledge into a liquid asset. Launch your findings to the decentralized research graph. 
+          Instant verification via Flare FDC. Instant liquidity via Plasma USDC.
         </p>
       </FadeIn>
 
       {message.text && (
         <Alert
           variant={message.type === 'error' ? 'destructive' : message.type === 'success' ? 'success' : 'default'}
-          className="mb-6"
+          className={`mb-6 rounded-none ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : ''}`}
         >
-          <AlertDescription>{message.text}</AlertDescription>
+          <AlertDescription className="font-mono text-xs">{message.text}</AlertDescription>
         </Alert>
       )}
 
@@ -128,84 +129,86 @@ function SubmitPaper({ contracts, account, importData }) {
         {/* PDF Upload */}
         <FadeIn delay={0.1}>
           {!pdfFile ? (
-            <label className="flex flex-col items-center justify-center border-2 border-dashed border-neutral-200 p-8 cursor-pointer hover:border-neutral-400 transition-colors">
+            <label className="flex flex-col items-center justify-center border border-dashed border-neutral-300 p-12 cursor-pointer hover:border-neutral-900 transition-all bg-neutral-50/50">
               <input type="file" accept=".pdf" onChange={handlePdfSelect} className="hidden" />
-              <Upload className="h-6 w-6 text-neutral-400 mb-2" />
-              <span className="font-mono text-xs uppercase tracking-widest text-neutral-500">Attach PDF</span>
-              <span className="text-xs text-neutral-400 mt-1">Stored on IPFS</span>
+              <Upload className="h-6 w-6 text-neutral-300 mb-3 group-hover:text-neutral-900" />
+              <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-500">Select Manuscript PDF</span>
+              <span className="text-[10px] text-neutral-400 mt-2 italic">Decentralized storage via IPFS</span>
             </label>
           ) : (
-            <div className="flex items-center gap-4 border border-neutral-200 p-4">
+            <div className="flex items-center gap-4 border border-neutral-900 p-5 bg-neutral-900 text-white">
               <FileText className="h-5 w-5 text-neutral-400 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{pdfFile.name}</div>
-                <div className="text-xs text-neutral-400">{formatFileSize(pdfFile.size)}</div>
+                <div className="text-sm font-medium truncate font-mono">{pdfFile.name}</div>
+                <div className="text-[10px] text-neutral-500 font-mono">{formatFileSize(pdfFile.size)}</div>
               </div>
-              <button type="button" onClick={removePdf} className="text-neutral-400 hover:text-neutral-900 transition-colors">
+              <button type="button" onClick={removePdf} className="text-neutral-500 hover:text-white transition-colors">
                 <X className="h-4 w-4" />
               </button>
             </div>
           )}
         </FadeIn>
 
-        <FadeIn delay={0.15}>
-          <div className="space-y-2">
-            <label className="font-mono text-xs uppercase tracking-widest text-neutral-500">Title</label>
-            <Input
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              placeholder="Paper title"
-              required
-            />
-          </div>
-        </FadeIn>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <FadeIn delay={0.15} className="md:col-span-2">
+            <div className="space-y-2">
+              <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">Research Title</label>
+              <Input
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                placeholder="The next paradigm shift in..."
+                required
+                className="rounded-none border-neutral-200 focus:border-neutral-900"
+              />
+            </div>
+          </FadeIn>
 
-        <FadeIn delay={0.2}>
-          <div className="space-y-2">
-            <label className="font-mono text-xs uppercase tracking-widest text-neutral-500">Abstract</label>
-            <Textarea
-              value={formData.abstract}
-              onChange={(e) => setFormData({ ...formData, abstract: e.target.value })}
-              placeholder="Paper abstract"
-              required
-              className="min-h-[120px]"
-            />
-          </div>
-        </FadeIn>
+          <FadeIn delay={0.2} className="md:col-span-2">
+            <div className="space-y-2">
+              <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">Abstract (Pitch)</label>
+              <Textarea
+                value={formData.abstract}
+                onChange={(e) => setFormData({ ...formData, abstract: e.target.value })}
+                placeholder="Why does this research matter? What is the core breakthrough?"
+                required
+                className="min-h-[140px] rounded-none border-neutral-200 focus:border-neutral-900 font-serif leading-relaxed"
+              />
+            </div>
+          </FadeIn>
 
-        <FadeIn delay={0.25}>
-          <div className="space-y-2">
-            <label className="font-mono text-xs uppercase tracking-widest text-neutral-500">DOI</label>
-            <Input
-              value={formData.doi}
-              onChange={(e) => setFormData({ ...formData, doi: e.target.value })}
-              placeholder="10.1234/example.2024"
-            />
-            <span className="text-xs text-neutral-400">
-              If provided, verified via Flare Data Connector
-            </span>
-          </div>
-        </FadeIn>
+          <FadeIn delay={0.25}>
+            <div className="space-y-2">
+              <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">DOI Reference</label>
+              <Input
+                value={formData.doi}
+                onChange={(e) => setFormData({ ...formData, doi: e.target.value })}
+                placeholder="10.1234/example.2024"
+                className="rounded-none border-neutral-200 focus:border-neutral-900"
+              />
+            </div>
+          </FadeIn>
 
-        <FadeIn delay={0.3}>
-          <div className="space-y-2">
-            <label className="font-mono text-xs uppercase tracking-widest text-neutral-500">IPFS Hash</label>
-            <Input
-              value={formData.ipfsHash}
-              onChange={(e) => setFormData({ ...formData, ipfsHash: e.target.value })}
-              placeholder="QmXYZ123... (auto-generated for demo)"
-            />
-          </div>
-        </FadeIn>
+          <FadeIn delay={0.3}>
+            <div className="space-y-2">
+              <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">Content Identifier</label>
+              <Input
+                value={formData.ipfsHash}
+                onChange={(e) => setFormData({ ...formData, ipfsHash: e.target.value })}
+                placeholder="IPFS_CONTENT_HASH"
+                className="rounded-none border-neutral-200 font-mono text-xs italic bg-neutral-50"
+              />
+            </div>
+          </FadeIn>
+        </div>
 
         <FadeIn delay={0.35}>
-          <div className="bg-neutral-50 border border-neutral-200 p-6">
-            <span className="font-mono text-xs uppercase tracking-widest text-neutral-400 block mb-3">After submission</span>
-            <ul className="space-y-2 text-sm text-neutral-600 font-light">
-              <li>Paper submitted to IPFS for decentralized storage</li>
-              <li>Flare FDC verifies external data (DOI, citations)</li>
-              <li>Reviewers assigned via Flare RNG, paid $100 USDC each</li>
-              <li>Accepted papers earn RESEARCH governance tokens</li>
+          <div className="border border-neutral-100 p-6 bg-neutral-50/50 space-y-4">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-400 block underline underline-offset-4">Protocol Launch Sequence</span>
+            <ul className="space-y-2 text-[11px] text-neutral-500 font-mono italic">
+              <li className="flex items-center gap-2"><div className="h-1 w-1 bg-neutral-400" /> Verify DOI via Flare Data Connector</li>
+              <li className="flex items-center gap-2"><div className="h-1 w-1 bg-neutral-400" /> Random reviewer assignment via Flare RNG</li>
+              <li className="flex items-center gap-2"><div className="h-1 w-1 bg-neutral-400" /> Settle submission fees via Plasma USDC</li>
+              <li className="flex items-center gap-2"><div className="h-1 w-1 bg-neutral-400" /> Initialize LMSR truth discovery market</li>
             </ul>
           </div>
         </FadeIn>
@@ -213,10 +216,10 @@ function SubmitPaper({ contracts, account, importData }) {
         <FadeIn delay={0.4}>
           <Button
             type="submit"
-            className="w-full bg-neutral-900 text-white hover:bg-neutral-800 font-mono text-xs uppercase tracking-widest h-12"
+            className="w-full bg-neutral-900 text-white hover:bg-neutral-800 font-mono text-xs uppercase tracking-widest h-14 rounded-none transition-all hover:tracking-[0.2em]"
             disabled={loading}
           >
-            {loading ? 'Submitting...' : 'Submit Paper — $50 USDC'}
+            {loading ? 'INITIATING LAUNCH...' : 'LAUNCH RESEARCH — $50 USDC'}
           </Button>
         </FadeIn>
       </form>

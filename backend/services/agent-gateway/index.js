@@ -19,10 +19,15 @@ class AgentGateway {
     }
 
     // Initialise provider
-    const apiKey = opts.apiKey || process.env.ANTHROPIC_API_KEY;
-    if (apiKey && apiKey !== 'mock') {
+    const geminiKey = opts.geminiKey || process.env.GEMINI_API_KEY;
+    const claudeKey = opts.apiKey || process.env.ANTHROPIC_API_KEY;
+
+    if (geminiKey && geminiKey !== 'mock') {
+      const GeminiProvider = require('./providers/gemini');
+      this.provider = new GeminiProvider(geminiKey);
+    } else if (claudeKey && claudeKey !== 'mock') {
       const ClaudeProvider = require('./providers/claude');
-      this.provider = new ClaudeProvider(apiKey);
+      this.provider = new ClaudeProvider(claudeKey);
     } else {
       const MockProvider = require('./providers/mock');
       this.provider = new MockProvider(this.mockResponses);
