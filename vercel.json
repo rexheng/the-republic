@@ -3,6 +3,14 @@
   "outputDirectory": "frontend/build",
   "installCommand": "npm install",
   "framework": null,
+  "regions": ["lhr1"],
+  "functions": {
+    "api/llm/chat.js": { "maxDuration": 10 },
+    "api/agents/index.js": { "maxDuration": 10 },
+    "api/kg/index.js": { "maxDuration": 10 },
+    "api/republic/index.js": { "maxDuration": 10 },
+    "api/swarm/index.js": { "maxDuration": 10 }
+  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
@@ -14,7 +22,8 @@
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "X-Frame-Options", "value": "DENY" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "X-XSS-Protection", "value": "1; mode=block" }
+        { "key": "X-XSS-Protection", "value": "1; mode=block" },
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://auth.privy.io; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.semanticscholar.org https://api.privy.io https://auth.privy.io https://coston2-api.flare.network https://rpc-testnet.plasma.xyz https://testnet-rpc.plasma.to https://generativelanguage.googleapis.com https://api.anthropic.com https://api.openai.com https://openrouter.ai https://gamma-api.polymarket.com; frame-src https://auth.privy.io; img-src 'self' data: https:; font-src 'self' data:;" }
       ]
     },
     {

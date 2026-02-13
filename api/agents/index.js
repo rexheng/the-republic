@@ -1,4 +1,5 @@
-// Vercel serverless function — Agent Gateway (stateless agents)
+// Vercel serverless function — Agent Gateway (stateless agents with LLM)
+import { callLLM } from '../_lib/llm.js';
 
 // Agent definitions
 const AGENTS = [
@@ -8,6 +9,16 @@ const AGENTS = [
   { id: 'sage', name: 'Dr. Sage', role: 'Guardian — Statistical Integrity', caste: 'guardian', description: 'Critiques statistical rigour, reproducibility, methodology.', temperature: 0.3 },
   { id: 'hermes', name: 'Agent Hermes', role: 'Data Oracle — Cross-Reference Verification', caste: 'producer', description: 'Verifies citations, cross-references external sources, detects anomalies.', temperature: 0.5 },
 ];
+
+// Caste-specific system prompts
+const CASTE_PROMPTS = {
+  philosopher: `You are {name}, a Philosopher King in The Republic — a decentralised research intelligence platform. Your role: {role}.
+You perform deep literature analysis, traverse knowledge graphs, identify research gaps, and generate novel hypotheses. You reason broadly across disciplines, connecting disparate ideas with intellectual rigour. Your responses are thoughtful, well-structured, and cite relevant concepts. Be concise but insightful.`,
+  guardian: `You are {name}, a Guardian in The Republic — a decentralised research intelligence platform. Your role: {role}.
+You evaluate methodology with surgical precision. You identify statistical flaws, check reproducibility criteria, assess experimental design quality, and critique analytical rigour. You are sceptical, evidence-based, and precise. Flag specific weaknesses and suggest concrete improvements. Be direct and concise.`,
+  producer: `You are {name}, a Producer (Artisan) in The Republic — a decentralised research intelligence platform. Your role: {role}.
+You estimate practical feasibility: compute costs, replication requirements, data availability, and implementation complexity. You verify citations, cross-reference external sources, and detect anomalies. You are pragmatic, data-driven, and quantitative. Provide actionable estimates and flag discrepancies. Be concise.`,
+};
 
 const CASTE_LIMITS = {
   guardian: { tokenLimit: 100000, warningAt: 0.8 },
@@ -43,7 +54,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     if (action === 'chat') {
-      const { agentId, task } = req.body;
+      const { agentId, task, provider, model, userApiKey, context } = req.body;
       if (!agentId || !task) {
         return res.status(400).json({ error: 'agentId and task are required' });
       }
@@ -53,14 +64,52 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: `Agent "${agentId}" not found` });
       }
 
-      return res.status(200).json({
-        agentId,
-        agentName: agent.name,
-        caste: agent.caste,
-        content: `[${agent.name}] Analysis pending — configure an LLM provider to enable AI agent responses.`,
-        tokensUsed: 0,
-        trismResult: null,
-      });
+      // Build caste-specific system prompt
+      const promptTemplate = CASTE_PROMPTS[agent.caste] || CASTE_PROMPTS.producer;
+      const systemPrompt = promptTemplate
+        .replace('{name}', agent.name)
+        .replace('{role}', agent.role);
+
+      // Build messages
+      const messages = [];
+      if (context) {
+        messages.push({ role: 'user', content: `Context:\n${context}` });
+        messages.push({ role: 'assistant', content: 'Understood. I have reviewed the context. What would you like me to analyse?' });
+      }
+      messages.push({ role: 'user', content: task });
+
+      try {
+        const content = await callLLM({
+          provider: provider || 'gemini',
+          model,
+          systemPrompt,
+          messages,
+          maxTokens: 1500,
+          temperature: agent.temperature,
+          userApiKey,
+        });
+
+        return res.status(200).json({
+          agentId,
+          agentName: agent.name,
+          caste: agent.caste,
+          content,
+          tokensUsed: content.length, // approximation
+          trismResult: null,
+        });
+      } catch (err) {
+        console.error(`Agent ${agentId} LLM error:`, err.message);
+        // Fallback: return error message but don't crash
+        return res.status(200).json({
+          agentId,
+          agentName: agent.name,
+          caste: agent.caste,
+          content: `[${agent.name}] Unable to generate response: ${err.message}. Please configure an LLM API key in Settings.`,
+          tokensUsed: 0,
+          trismResult: null,
+          error: err.message,
+        });
+      }
     }
 
     if (action === 'create') {

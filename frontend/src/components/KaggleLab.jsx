@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { getPaperInfo } from '../utils/paperTechniqueMap';
 import { BACKEND_URL } from '../config';
+import { usePyodideLab, PYODIDE_STATES } from '../hooks/usePyodideLab';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { FadeIn } from '@/components/ui/fade-in';
 import {
   Trophy, Rocket, Download, RefreshCw, Clock, Check, X, AlertCircle,
-  BookOpen, BarChart3, Brain, FileText, Loader2, ServerOff
+  BookOpen, BarChart3, Brain, FileText, Loader2, ServerOff, Upload, Monitor
 } from 'lucide-react';
 
 const PIPELINE_STEPS = [
@@ -20,42 +21,63 @@ const PIPELINE_STEPS = [
 ];
 
 const KaggleLab = () => {
-  const [backendOnline, setBackendOnline] = useState(null); // null = checking, true/false
+  // ─── Mode detection: backend (WebSocket) vs browser (Pyodide) ───
+  const [backendOnline, setBackendOnline] = useState(null);
+  const useBackendMode = BACKEND_URL && backendOnline === true;
+
+  // ─── Shared UI state ───
   const [competition, setCompetition] = useState('');
   const [apiToken, setApiToken] = useState('');
+  const [uploadedFiles, setUploadedFiles] = useState(null);
+  const fileInputRef = useRef(null);
+  const graphRef = useRef(null);
+
+  // ─── Backend mode state (WebSocket) ───
   const [sessionId, setSessionId] = useState(null);
-  const [error, setError] = useState(null);
-  const [stages, setStages] = useState({
+  const [backendError, setBackendError] = useState(null);
+  const [backendStages, setBackendStages] = useState({
     download: { status: 'pending', logs: [] },
     explore: { status: 'pending', logs: [] },
     paper_search: { status: 'pending', logs: [] },
     experiment: { status: 'pending', logs: [] },
     submit: { status: 'pending', logs: [] },
   });
-  const [matchedPapers, setMatchedPapers] = useState([]);
-  const [experiments, setExperiments] = useState([]);
-  const [leaderboard, setLeaderboard] = useState([]);
-  const [bestExperiment, setBestExperiment] = useState(null);
-  const [knowledgeGraph, setKnowledgeGraph] = useState(null);
-  const [isRunning, setIsRunning] = useState(false);
+  const [backendMatchedPapers, setBackendMatchedPapers] = useState([]);
+  const [backendExperiments, setBackendExperiments] = useState([]);
+  const [backendLeaderboard, setBackendLeaderboard] = useState([]);
+  const [backendBestExperiment, setBackendBestExperiment] = useState(null);
+  const [backendKnowledgeGraph, setBackendKnowledgeGraph] = useState(null);
+  const [backendIsRunning, setBackendIsRunning] = useState(false);
   const wsRef = useRef(null);
-  const graphRef = useRef(null);
 
-  // Fetch knowledge graph from API
+  // ─── Browser mode (Pyodide) ───
+  const pyodide = usePyodideLab();
+
+  // ─── Unified getters: pick from active mode ───
+  const stages = useBackendMode ? backendStages : pyodide.stages;
+  const matchedPapers = useBackendMode ? backendMatchedPapers : pyodide.matchedPapers;
+  const experiments = useBackendMode ? backendExperiments : pyodide.experiments;
+  const leaderboard = useBackendMode ? backendLeaderboard : pyodide.leaderboard;
+  const bestExperiment = useBackendMode ? backendBestExperiment : pyodide.bestExperiment;
+  const knowledgeGraph = useBackendMode ? backendKnowledgeGraph : pyodide.knowledgeGraph;
+  const isRunning = useBackendMode ? backendIsRunning : pyodide.isRunning;
+  const error = useBackendMode ? backendError : pyodide.error;
+
+  // Fetch knowledge graph from backend API (backend mode only)
   const fetchKnowledgeGraph = useCallback(async () => {
     if (!competition || !BACKEND_URL) return;
     try {
       const response = await fetch(`${BACKEND_URL}/api/kaggle/knowledge-graph/${competition}`);
       if (response.ok) {
         const kg = await response.json();
-        setKnowledgeGraph(kg);
+        setBackendKnowledgeGraph(kg);
       }
     } catch (error) {
       console.error('Error fetching knowledge graph:', error);
     }
   }, [competition]);
 
-  // Check if backend is reachable (Kaggle Lab requires a dedicated backend with Python)
+  // Check if backend is reachable (optional — browser mode works without it)
   useEffect(() => {
     if (!BACKEND_URL) {
       setBackendOnline(false);
@@ -72,8 +94,9 @@ const KaggleLab = () => {
     check();
   }, []);
 
+  // WebSocket connection (backend mode only)
   useEffect(() => {
-    if (backendOnline === false || !BACKEND_URL) return;
+    if (!useBackendMode) return;
     const wsUrl = BACKEND_URL.replace(/^http/, 'ws');
     const ws = new WebSocket(wsUrl);
 
@@ -82,10 +105,9 @@ const KaggleLab = () => {
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
-      // Update pipeline stage status
       const stageKey = data.stage;
       if (stageKey && ['download', 'explore', 'paper_search', 'experiment', 'submit'].includes(stageKey)) {
-        setStages(prev => ({
+        setBackendStages(prev => ({
           ...prev,
           [stageKey]: {
             status: data.status,
@@ -97,9 +119,8 @@ const KaggleLab = () => {
         }));
       }
 
-      // Handle paper-matched events
       if (data.event === 'paper_matched') {
-        setMatchedPapers(prev => [...prev, {
+        setBackendMatchedPapers(prev => [...prev, {
           paperId: data.paperId || data.paper_id,
           paperTitle: data.paperTitle || data.paper_title,
           technique: data.technique,
@@ -108,9 +129,8 @@ const KaggleLab = () => {
         }]);
       }
 
-      // Handle experiment-start: dynamically add agent cards
       if (data.event === 'experiment_start') {
-        setExperiments(prev => {
+        setBackendExperiments(prev => {
           const exists = prev.find(e => e.id === data.experimentId);
           if (exists) {
             return prev.map(e => e.id === data.experimentId
@@ -119,153 +139,149 @@ const KaggleLab = () => {
             );
           }
           return [...prev, {
-            id: data.experimentId,
-            paperId: data.paperId,
-            paperTitle: data.paperTitle,
-            technique: data.technique,
-            strategy: data.strategy,
-            status: 'running',
-            cvScore: null,
-            std: null,
-            model: null,
-            featuresUsed: null,
+            id: data.experimentId, paperId: data.paperId, paperTitle: data.paperTitle,
+            technique: data.technique, strategy: data.strategy, status: 'running',
+            cvScore: null, std: null, model: null, featuresUsed: null,
             logs: [{ message: `Starting: ${data.strategy}`, timestamp: data.timestamp }],
           }];
         });
       }
 
-      // Experiment log
       if (data.event === 'experiment_log') {
-        setExperiments(prev => prev.map(exp =>
+        setBackendExperiments(prev => prev.map(exp =>
           exp.id === data.experimentId
             ? { ...exp, logs: [...exp.logs, { message: data.message, timestamp: data.timestamp }].slice(-5) }
             : exp
         ));
       }
 
-      // Experiment result
       if (data.event === 'experiment_result') {
-        setExperiments(prev => prev.map(exp =>
+        setBackendExperiments(prev => prev.map(exp =>
           exp.id === data.experimentId
-            ? {
-              ...exp,
-              status: 'done',
-              cvScore: data.cvScore,
-              std: data.std,
-              model: data.model,
-              featuresUsed: data.featuresUsed,
-              logs: [...exp.logs, { message: `CV=${data.cvScore} (+/-${data.std})`, timestamp: data.timestamp }].slice(-5),
-            }
+            ? { ...exp, status: 'done', cvScore: data.cvScore, std: data.std,
+                model: data.model, featuresUsed: data.featuresUsed,
+                logs: [...exp.logs, { message: `CV=${data.cvScore} (+/-${data.std})`, timestamp: data.timestamp }].slice(-5) }
             : exp
         ));
-        setLeaderboard(prev => {
+        setBackendLeaderboard(prev => {
           const updated = [...prev, {
-            id: data.experimentId,
-            paperId: data.paperId,
-            technique: data.technique,
-            cvScore: data.cvScore,
-            std: data.std,
-            model: data.model,
-            featuresUsed: data.featuresUsed,
+            id: data.experimentId, paperId: data.paperId, technique: data.technique,
+            cvScore: data.cvScore, std: data.std, model: data.model, featuresUsed: data.featuresUsed,
           }];
           return updated.sort((a, b) => b.cvScore - a.cvScore);
         });
       }
 
-      // Best selected
       if (data.event === 'best_selected') {
-        setBestExperiment({
-          id: data.experimentId,
-          paperId: data.paperId,
-          name: data.experimentName,
-          cvScore: data.cvScore,
-        });
+        setBackendBestExperiment({ id: data.experimentId, paperId: data.paperId,
+          name: data.experimentName, cvScore: data.cvScore });
       }
 
-      // Submission ready
-      if (data.event === 'submission_ready') {
-        setIsRunning(false);
-      }
-
-      // Knowledge graph built -- fetch it
-      if (data.event === 'knowledge_graph_built') {
-        fetchKnowledgeGraph();
-      }
-
-      // Pipeline completed or errored
-      if (data.status === 'completed' && data.stage === 'submit') {
-        setIsRunning(false);
-      }
-      if (data.status === 'error') {
-        setIsRunning(false);
-      }
+      if (data.event === 'submission_ready') setBackendIsRunning(false);
+      if (data.event === 'knowledge_graph_built') fetchKnowledgeGraph();
+      if (data.status === 'completed' && data.stage === 'submit') setBackendIsRunning(false);
+      if (data.status === 'error') setBackendIsRunning(false);
     };
 
     ws.onerror = () => {};
     ws.onclose = () => {};
     wsRef.current = ws;
-
     return () => ws.close();
-  }, [fetchKnowledgeGraph]);
+  }, [useBackendMode, fetchKnowledgeGraph]);
 
+  // ─── Start pipeline (routes to backend or browser mode) ───
   const startPipeline = async () => {
-    if (!competition.trim()) {
-      setError('Please enter a competition name.');
+    if (!competition.trim() && !uploadedFiles) {
+      setBackendError('Please enter a competition name or upload files.');
       return;
     }
 
-    // Reset state
-    setStages({
-      download: { status: 'pending', logs: [] },
-      explore: { status: 'pending', logs: [] },
-      paper_search: { status: 'pending', logs: [] },
-      experiment: { status: 'pending', logs: [] },
-      submit: { status: 'pending', logs: [] },
-    });
-    setMatchedPapers([]);
-    setExperiments([]);
-    setLeaderboard([]);
-    setBestExperiment(null);
-    setKnowledgeGraph(null);
-    setIsRunning(true);
-
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/kaggle/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          competition: competition.trim(),
-          apiToken: apiToken.trim(),
-          llmProvider: localStorage.getItem('rg_llm_provider') || '',
-          llmModel: localStorage.getItem('rg_llm_model') || '',
-        }),
+    if (useBackendMode) {
+      // Backend mode — existing WebSocket flow
+      setBackendStages({
+        download: { status: 'pending', logs: [] },
+        explore: { status: 'pending', logs: [] },
+        paper_search: { status: 'pending', logs: [] },
+        experiment: { status: 'pending', logs: [] },
+        submit: { status: 'pending', logs: [] },
       });
-      const data = await response.json();
-      setSessionId(data.sessionId);
-      setError(null);
-    } catch (err) {
-      console.error('Error starting pipeline:', err);
-      setError('Could not reach backend. Kaggle Lab requires the backend server to be running.');
-      setBackendOnline(false);
-      setIsRunning(false);
+      setBackendMatchedPapers([]);
+      setBackendExperiments([]);
+      setBackendLeaderboard([]);
+      setBackendBestExperiment(null);
+      setBackendKnowledgeGraph(null);
+      setBackendIsRunning(true);
+
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/kaggle/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            competition: competition.trim(),
+            apiToken: apiToken.trim(),
+            llmProvider: localStorage.getItem('rg_llm_provider') || '',
+            llmModel: localStorage.getItem('rg_llm_model') || '',
+          }),
+        });
+        const data = await response.json();
+        setSessionId(data.sessionId);
+        setBackendError(null);
+      } catch (err) {
+        setBackendError('Could not reach backend. Falling back to browser mode may help.');
+        setBackendOnline(false);
+        setBackendIsRunning(false);
+      }
+    } else {
+      // Browser mode — Pyodide
+      pyodide.startPipeline({
+        competition: competition.trim(),
+        apiToken: apiToken.trim(),
+        uploadedFiles: uploadedFiles || undefined,
+        llmProvider: localStorage.getItem('rg_llm_provider') || '',
+        llmModel: localStorage.getItem('rg_llm_model') || '',
+        userApiKey: localStorage.getItem('rg_llm_api_key') || '',
+      });
     }
   };
 
+  // ─── Handle file upload ──────────────────────────────────
+  const handleFileUpload = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      setUploadedFiles(files);
+      pyodide.setNeedsFileUpload(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length > 0) {
+      setUploadedFiles(files);
+      pyodide.setNeedsFileUpload(false);
+    }
+  };
+
+  // ─── Download submission ─────────────────────────────────
   const downloadSubmission = async () => {
-    if (!competition) return;
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/kaggle/submission/${competition}`);
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'submission.csv';
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error('Error downloading submission:', error);
+    if (useBackendMode) {
+      if (!competition) return;
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/kaggle/submission/${competition}`);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'submission.csv';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } catch (error) {
+        console.error('Error downloading submission:', error);
+      }
+    } else {
+      pyodide.downloadSubmission();
     }
   };
 
@@ -327,16 +343,33 @@ const KaggleLab = () => {
         </p>
       </div>
 
-      {/* Backend status banner */}
-      {backendOnline === false && (
-        <div className="flex items-center gap-3 border border-amber-200 bg-amber-50 p-4 rounded-lg">
-          <ServerOff className="w-5 h-5 text-amber-600 flex-shrink-0" />
+      {/* Mode indicator */}
+      {useBackendMode ? (
+        <div className="flex items-center gap-2 text-xs text-neutral-400 font-mono">
+          <Monitor className="w-3.5 h-3.5" />
+          <span>Connected to backend server</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-xs text-neutral-400 font-mono">
+          <Brain className="w-3.5 h-3.5" />
+          <span>
+            {pyodide.pyodideState === PYODIDE_STATES.READY
+              ? 'Running in browser (Python via WebAssembly)'
+              : pyodide.pyodideState === PYODIDE_STATES.LOADING
+              ? 'Loading ML environment...'
+              : 'Browser mode — ML runs locally in your browser'}
+          </span>
+        </div>
+      )}
+
+      {/* Pyodide loading progress */}
+      {!useBackendMode && pyodide.pyodideState === PYODIDE_STATES.LOADING && (
+        <div className="flex items-center gap-3 border border-blue-200 bg-blue-50 p-4 rounded-lg">
+          <Loader2 className="w-5 h-5 text-blue-600 animate-spin flex-shrink-0" />
           <div>
-            <div className="text-sm font-medium text-amber-800">AI Kaggle Lab Unavailable</div>
-            <div className="text-xs text-amber-600 mt-0.5">
-              The Kaggle Lab requires backend services (Python ML agents + WebSocket coordination).
-              {' '}The Kaggle Lab requires a dedicated backend server with Python ML agents.
-              {' '}Set <code className="bg-amber-100 px-1 py-0.5 rounded text-[11px]">VITE_BACKEND_URL</code> to your backend URL to enable this feature.
+            <div className="text-sm font-medium text-blue-800">Loading Python ML Environment</div>
+            <div className="text-xs text-blue-600 mt-0.5">
+              {pyodide.loadProgress || 'Downloading scikit-learn, pandas, numpy (~40MB, cached after first load)...'}
             </div>
           </div>
         </div>
@@ -368,23 +401,79 @@ const KaggleLab = () => {
           </div>
           <div className="space-y-1.5">
             <label className="font-mono text-xs font-bold uppercase tracking-widest text-neutral-400">
-              Kaggle API Token (Optional)
+              Kaggle API Token
             </label>
             <Input
               type="password"
               value={apiToken}
               onChange={(e) => setApiToken(e.target.value)}
-              placeholder="KGAT_..."
+              placeholder="KGAT_... or username:key"
               disabled={isRunning}
             />
-            <span className="text-[11px] text-neutral-400">From kaggle.com/settings -- API</span>
+            <span className="text-[11px] text-neutral-400">
+              From kaggle.com/settings &mdash; needed to auto-download data
+            </span>
           </div>
         </div>
+
+        {/* File upload area — shown in browser mode */}
+        {!useBackendMode && (
+          <div
+            className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+              uploadedFiles ? 'border-green-300 bg-green-50' :
+              pyodide.needsFileUpload ? 'border-amber-300 bg-amber-50' :
+              'border-neutral-200 bg-neutral-50 hover:border-neutral-300'
+            }`}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.zip"
+              multiple
+              className="hidden"
+              onChange={handleFileUpload}
+              disabled={isRunning}
+            />
+            {uploadedFiles ? (
+              <div className="flex items-center justify-center gap-2 text-sm text-green-700">
+                <Check className="w-4 h-4" />
+                <span>{uploadedFiles.map(f => f.name).join(', ')}</span>
+                <button
+                  onClick={() => setUploadedFiles(null)}
+                  className="ml-2 text-green-500 hover:text-green-700"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isRunning}
+                className="w-full"
+              >
+                <div className="flex flex-col items-center gap-1.5">
+                  <Upload className="w-5 h-5 text-neutral-400" />
+                  <span className="text-sm text-neutral-500">
+                    {pyodide.needsFileUpload
+                      ? 'Download failed — drop train.csv + test.csv here (or a .zip)'
+                      : 'Or upload files directly: drop train.csv + test.csv (or .zip)'}
+                  </span>
+                  <span className="text-[10px] text-neutral-400">
+                    No API token? Download from Kaggle manually and upload here
+                  </span>
+                </div>
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-3">
           <Button
             variant="default"
             onClick={startPipeline}
-            disabled={isRunning || backendOnline === false}
+            disabled={isRunning || (!competition.trim() && !uploadedFiles)}
           >
             {isRunning ? (
               <>

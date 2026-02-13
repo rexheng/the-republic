@@ -40,7 +40,7 @@ export default async function handler(req, res) {
   // Default: status
   const [humanResult, aiResult] = await Promise.all([
     getBlockNumber('https://coston2-api.flare.network/ext/C/rpc'),
-    getBlockNumber(process.env.PLASMA_RPC || 'https://testnet-rpc.plasma.to'),
+    getBlockNumber(process.env.PLASMA_RPC || 'https://rpc-testnet.plasma.xyz'),
   ]);
 
   res.setHeader('Cache-Control', 's-maxage=10, stale-while-revalidate=30');

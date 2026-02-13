@@ -21,7 +21,7 @@ module.exports = {
     },
     // Plasma Testnet
     plasma: {
-      url: process.env.PLASMA_RPC || "https://testnet-rpc.plasma.to",
+      url: process.env.PLASMA_RPC || "https://rpc-testnet.plasma.xyz",
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
       chainId: 9746
     },

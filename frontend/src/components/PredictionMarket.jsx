@@ -1,12 +1,12 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { ethers } from 'ethers';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ExternalLink, BookOpen, Search, Loader2 } from 'lucide-react';
+import { ExternalLink, BookOpen, Search, Loader2, Filter, X, TrendingUp, DollarSign, Clock, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { FadeIn } from '@/components/ui/fade-in';
-import { fetchPolymarketEvents, getPolymarketUrl } from '../utils/polymarket';
+import { fetchPolymarketEvents, getPolymarketUrl, ACADEMIC_FIELDS } from '../utils/polymarket';
 import { searchPapers } from '../utils/semanticScholar';
 
 // ─── LMSR math ────────────────────────────────────────────────────
@@ -198,19 +198,79 @@ function PredictionMarket({ contracts, account }) {
   // Paper search state per market
   const [paperResults, setPaperResults] = useState({});
   const [loadingPapers, setLoadingPapers] = useState({});
+  // Search & filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeField, setActiveField] = useState(null); // selected academic field
+  const [searchInput, setSearchInput] = useState('');
+  const [sortBy, setSortBy] = useState('volume'); // volume | liquidity | newest
 
   const getUserPosition = (marketId) => positions.find(p => p.marketId === marketId) || null;
 
-  // Fetch Polymarket events on tab switch
+  // Fetch Polymarket events on tab switch or when filters change
+  const loadPolymarketEvents = useCallback(async (opts = {}) => {
+    setLoadingPoly(true);
+    try {
+      const events = await fetchPolymarketEvents({
+        limit: 30,
+        search: opts.search || searchQuery,
+        tag: opts.tag || '',
+      });
+      setPolymarketEvents(events);
+    } catch (err) {
+      console.error('Polymarket fetch failed:', err);
+    } finally {
+      setLoadingPoly(false);
+    }
+  }, [searchQuery]);
+
   useEffect(() => {
     if (source === 'polymarket' && polymarketEvents.length === 0) {
-      setLoadingPoly(true);
-      fetchPolymarketEvents({ limit: 10 })
-        .then(events => setPolymarketEvents(events))
-        .catch(err => console.error('Polymarket fetch failed:', err))
-        .finally(() => setLoadingPoly(false));
+      loadPolymarketEvents();
     }
-  }, [source, polymarketEvents.length]);
+  }, [source]);
+
+  // Handle search submission
+  const handleSearch = useCallback((e) => {
+    e?.preventDefault?.();
+    setSearchQuery(searchInput);
+    loadPolymarketEvents({ search: searchInput });
+  }, [searchInput, loadPolymarketEvents]);
+
+  // Handle field filter
+  const handleFieldFilter = useCallback((field) => {
+    if (activeField === field) {
+      setActiveField(null);
+      setSearchQuery('');
+      setSearchInput('');
+      loadPolymarketEvents({ search: '' });
+    } else {
+      setActiveField(field);
+      setSearchInput(field);
+      setSearchQuery(field);
+      loadPolymarketEvents({ search: field });
+    }
+  }, [activeField, loadPolymarketEvents]);
+
+  // Filter + sort Polymarket events client-side
+  const filteredPolyEvents = useMemo(() => {
+    let events = [...polymarketEvents];
+
+    // Filter by active academic field
+    if (activeField) {
+      events = events.filter(e => e.fields?.includes(activeField));
+    }
+
+    // Sort
+    if (sortBy === 'volume') {
+      events.sort((a, b) => (b.volume || 0) - (a.volume || 0));
+    } else if (sortBy === 'liquidity') {
+      events.sort((a, b) => (b.liquidity || 0) - (a.liquidity || 0));
+    } else if (sortBy === 'newest') {
+      events.sort((a, b) => new Date(b.endDate || 0) - new Date(a.endDate || 0));
+    }
+
+    return events;
+  }, [polymarketEvents, activeField, sortBy]);
 
   // Search for relevant academic papers for a market question, then rank by relevance
   const findRelatedPapers = useCallback(async (marketId, question, description) => {
@@ -271,77 +331,108 @@ function PredictionMarket({ contracts, account }) {
 
     return (
       <FadeIn key={event.id} delay={0.03 * i}>
-        <div className="border border-neutral-100 p-6 hover:bg-neutral-50/50 transition-all group relative">
-          <div className="flex items-start justify-between mb-4">
-            <div className="flex flex-col flex-1 mr-4">
-              <h3 className="text-lg font-medium leading-snug">{event.question}</h3>
-              {event.description && (
-                <p className="text-xs text-neutral-500 mt-1 line-clamp-2">{event.description}</p>
+        <div className="border border-neutral-100 hover:border-neutral-200 hover:bg-neutral-50/30 transition-all group relative overflow-hidden">
+          {/* Header with image */}
+          <div className="flex">
+            {event.image && (
+              <div className="w-20 h-20 flex-shrink-0 overflow-hidden bg-neutral-100">
+                <img
+                  src={event.image}
+                  alt=""
+                  className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                  onError={e => { e.target.style.display = 'none'; }}
+                />
+              </div>
+            )}
+            <div className="flex-1 p-4 pb-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-[15px] font-medium leading-snug line-clamp-2">{event.question}</h3>
+                  {event.description && event.description !== event.question && (
+                    <p className="text-[11px] text-neutral-400 mt-1 line-clamp-1">{event.description}</p>
+                  )}
+                </div>
+                <Badge className="text-[8px] font-mono rounded-none bg-purple-50 text-purple-700 border-purple-200 flex-shrink-0">POLYMARKET</Badge>
+              </div>
+              {/* Field tags */}
+              {event.fields && event.fields.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {event.fields.slice(0, 3).map(f => (
+                    <span
+                      key={f}
+                      onClick={() => handleFieldFilter(f)}
+                      className="text-[8px] font-mono px-1.5 py-0.5 bg-blue-50 text-blue-600 cursor-pointer hover:bg-blue-100 transition-colors"
+                    >
+                      {f}
+                    </span>
+                  ))}
+                </div>
               )}
             </div>
-            <div className="flex flex-col items-end gap-2 flex-shrink-0">
-              <Badge className="text-[9px] font-mono rounded-none bg-purple-100 text-purple-800 border-purple-200">POLYMARKET</Badge>
-              <div className="text-[10px] font-mono text-neutral-400">
-                {event.endDate ? new Date(event.endDate).toLocaleDateString() : 'Open'}
+          </div>
+
+          {/* Pricing bar */}
+          <div className="px-4 pb-3">
+            <div className="grid grid-cols-2 gap-px bg-neutral-100 border border-neutral-100">
+              <div className="bg-white p-2.5">
+                <div className="flex justify-between items-end mb-1">
+                  <span className="font-mono text-[9px] text-green-600 font-bold uppercase">{event.outcomes[0] || 'YES'}</span>
+                  <span className="text-lg font-light tabular-nums text-green-700">{yesPrice.toFixed(2)}</span>
+                </div>
+                <div className="h-1 bg-green-50 w-full">
+                  <div className="h-full bg-green-500 transition-all" style={{ width: `${yesPercent}%` }} />
+                </div>
+              </div>
+              <div className="bg-white p-2.5">
+                <div className="flex justify-between items-end mb-1">
+                  <span className="font-mono text-[9px] text-red-600 font-bold uppercase">{event.outcomes[1] || 'NO'}</span>
+                  <span className="text-lg font-light tabular-nums text-red-700">{noPrice.toFixed(2)}</span>
+                </div>
+                <div className="h-1 bg-red-50 w-full flex justify-end">
+                  <div className="h-full bg-red-500 transition-all" style={{ width: `${noPercent}%` }} />
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Pricing */}
-          <div className="grid grid-cols-2 gap-px bg-neutral-100 border border-neutral-100 mb-4">
-            <div className="bg-white p-3">
-              <div className="flex justify-between items-end mb-1">
-                <span className="font-mono text-[9px] text-green-600 font-bold uppercase">{event.outcomes[0] || 'YES'}</span>
-                <span className="text-xl font-light tabular-nums text-green-700">{yesPrice.toFixed(2)}</span>
-              </div>
-              <div className="h-1 bg-green-50 w-full">
-                <div className="h-full bg-green-500" style={{ width: `${yesPercent}%` }} />
-              </div>
+          {/* Stats row */}
+          <div className="px-4 pb-3 flex items-center gap-5 text-[10px] text-neutral-400 font-mono uppercase tracking-wider">
+            <div className="flex items-center gap-1">
+              <DollarSign className="h-3 w-3" />
+              <span>${(event.volume || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
             </div>
-            <div className="bg-white p-3">
-              <div className="flex justify-between items-end mb-1">
-                <span className="font-mono text-[9px] text-red-600 font-bold uppercase">{event.outcomes[1] || 'NO'}</span>
-                <span className="text-xl font-light tabular-nums text-red-700">{noPrice.toFixed(2)}</span>
-              </div>
-              <div className="h-1 bg-red-50 w-full flex justify-end">
-                <div className="h-full bg-red-500" style={{ width: `${noPercent}%` }} />
-              </div>
+            <div className="flex items-center gap-1">
+              <TrendingUp className="h-3 w-3" />
+              <span>${(event.liquidity || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
             </div>
-          </div>
-
-          <div className="flex items-center gap-6 text-[10px] text-neutral-400 font-mono mb-4 uppercase tracking-wider">
-            <div className="flex flex-col">
-              <span className="text-[8px] text-neutral-300">Liquidity</span>
-              <span>${(event.liquidity || 0).toLocaleString()}</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[8px] text-neutral-300">Spread</span>
-              <span>{((event.bestAsk - event.bestBid) * 100).toFixed(1)}%</span>
+            <div className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              <span>{event.endDate ? new Date(event.endDate).toLocaleDateString() : 'Open'}</span>
             </div>
           </div>
 
           {/* Action buttons */}
-          <div className="flex items-center gap-2">
+          <div className="px-4 pb-4 flex items-center gap-2">
             <a
               href={event.polymarketUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-4 h-10 border border-purple-600 text-purple-700 hover:bg-purple-700 hover:text-white font-mono text-[10px] uppercase tracking-widest transition-all"
+              className="inline-flex items-center gap-1.5 px-3 h-8 border border-purple-600 text-purple-700 hover:bg-purple-700 hover:text-white font-mono text-[9px] uppercase tracking-widest transition-all"
             >
               <ExternalLink className="h-3 w-3" />
-              Trade on Polymarket
+              Trade
             </a>
             <Button
               variant="outline"
               size="sm"
-              className="font-mono text-[10px] uppercase tracking-widest h-10 px-4 rounded-none"
+              className="font-mono text-[9px] uppercase tracking-widest h-8 px-3 rounded-none"
               onClick={() => {
                 setExpandedBet(isExpanded ? null : event.id);
                 if (!isExpanded) findRelatedPapers(event.id, event.question, event.description);
               }}
             >
-              <BookOpen className="h-3 w-3 mr-1.5" />
-              {isExpanded ? 'Hide Papers' : 'Related Research'}
+              <BookOpen className="h-3 w-3 mr-1" />
+              {isExpanded ? 'Hide' : 'Research'}
             </Button>
           </div>
 
@@ -678,46 +769,138 @@ function PredictionMarket({ contracts, account }) {
         <div className="space-y-4">
           {source === 'republic' && filteredMarkets.map((market, i) => renderRepublicCard(market, i))}
 
-          {source === 'polymarket' && loadingPoly && (
-            <div className="flex flex-col items-center justify-center py-16 gap-4">
-              <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
-              <span className="font-mono text-xs uppercase tracking-widest text-neutral-400">Fetching live Polymarket events...</span>
-              <div className="w-64 h-1 bg-neutral-100 overflow-hidden">
-                <div className="h-full bg-purple-500 animate-pulse" style={{
-                  animation: 'loading-bar 2s ease-in-out infinite',
-                  width: '100%',
-                  transformOrigin: 'left',
-                }} />
-              </div>
-              <style>{`
-                @keyframes loading-bar {
-                  0% { transform: scaleX(0); transform-origin: left; }
-                  50% { transform: scaleX(1); transform-origin: left; }
-                  51% { transform: scaleX(1); transform-origin: right; }
-                  100% { transform: scaleX(0); transform-origin: right; }
-                }
-              `}</style>
-            </div>
-          )}
+          {source === 'polymarket' && (
+            <>
+              {/* Search + Filter bar */}
+              <FadeIn delay={0.05}>
+                <div className="space-y-3 mb-6">
+                  {/* Search input */}
+                  <form onSubmit={handleSearch} className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-neutral-400" />
+                      <Input
+                        type="text"
+                        value={searchInput}
+                        onChange={e => setSearchInput(e.target.value)}
+                        placeholder="Search questions, topics, e.g. 'climate change', 'election'..."
+                        className="h-9 pl-9 rounded-none font-mono text-xs border-neutral-200 focus:border-purple-400"
+                      />
+                      {searchInput && (
+                        <button
+                          type="button"
+                          onClick={() => { setSearchInput(''); setSearchQuery(''); setActiveField(null); loadPolymarketEvents({ search: '' }); }}
+                          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <Button type="submit" variant="outline" size="sm" className="h-9 px-4 rounded-none font-mono text-[9px] uppercase tracking-widest">
+                      Search
+                    </Button>
+                  </form>
 
-          {source === 'polymarket' && !loadingPoly && polymarketEvents.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-neutral-400">
-              <span className="font-mono text-xs uppercase tracking-widest">No events loaded</span>
-              <button
-                className="px-4 py-2 border border-purple-300 text-purple-600 font-mono text-[10px] uppercase tracking-widest hover:bg-purple-50 transition-all"
-                onClick={() => {
-                  setLoadingPoly(true);
-                  fetchPolymarketEvents({ limit: 10 })
-                    .then(events => setPolymarketEvents(events))
-                    .finally(() => setLoadingPoly(false));
-                }}
-              >
-                Retry
-              </button>
-            </div>
-          )}
+                  {/* Academic field chips */}
+                  <div className="flex flex-wrap gap-1.5">
+                    <span className="flex items-center gap-1 text-[9px] font-mono text-neutral-400 uppercase tracking-wider mr-1">
+                      <Tag className="h-3 w-3" /> Fields:
+                    </span>
+                    {ACADEMIC_FIELDS.map(field => (
+                      <button
+                        key={field}
+                        onClick={() => handleFieldFilter(field)}
+                        className={`px-2 py-1 text-[9px] font-mono uppercase tracking-wider border transition-all ${
+                          activeField === field
+                            ? 'bg-purple-600 text-white border-purple-600'
+                            : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-300 hover:text-purple-600'
+                        }`}
+                      >
+                        {field}
+                      </button>
+                    ))}
+                  </div>
 
-          {source === 'polymarket' && !loadingPoly && polymarketEvents.map((event, i) => renderPolyCard(event, i))}
+                  {/* Sort options */}
+                  <div className="flex items-center gap-3 text-[9px] font-mono uppercase tracking-wider text-neutral-400">
+                    <span>Sort:</span>
+                    {[
+                      { key: 'volume', label: 'Volume', icon: DollarSign },
+                      { key: 'liquidity', label: 'Liquidity', icon: TrendingUp },
+                      { key: 'newest', label: 'End Date', icon: Clock },
+                    ].map(opt => (
+                      <button
+                        key={opt.key}
+                        onClick={() => setSortBy(opt.key)}
+                        className={`flex items-center gap-1 px-2 py-1 transition-all ${
+                          sortBy === opt.key ? 'text-neutral-700 underline underline-offset-4' : 'hover:text-neutral-600'
+                        }`}
+                      >
+                        <opt.icon className="h-3 w-3" />
+                        {opt.label}
+                      </button>
+                    ))}
+                    <span className="ml-auto text-neutral-300">{filteredPolyEvents.length} events</span>
+                  </div>
+                </div>
+              </FadeIn>
+
+              {/* Loading state */}
+              {loadingPoly && (
+                <div className="flex flex-col items-center justify-center py-16 gap-4">
+                  <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
+                  <span className="font-mono text-xs uppercase tracking-widest text-neutral-400">Fetching live Polymarket events...</span>
+                  <div className="w-64 h-1 bg-neutral-100 overflow-hidden">
+                    <div className="h-full bg-purple-500 animate-pulse" style={{
+                      animation: 'loading-bar 2s ease-in-out infinite',
+                      width: '100%',
+                      transformOrigin: 'left',
+                    }} />
+                  </div>
+                  <style>{`
+                    @keyframes loading-bar {
+                      0% { transform: scaleX(0); transform-origin: left; }
+                      50% { transform: scaleX(1); transform-origin: left; }
+                      51% { transform: scaleX(1); transform-origin: right; }
+                      100% { transform: scaleX(0); transform-origin: right; }
+                    }
+                  `}</style>
+                </div>
+              )}
+
+              {/* Empty state */}
+              {!loadingPoly && filteredPolyEvents.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-neutral-400">
+                  <Search className="h-6 w-6 text-neutral-300" />
+                  <span className="font-mono text-xs uppercase tracking-widest">
+                    {searchQuery || activeField ? 'No matching events found' : 'No events loaded'}
+                  </span>
+                  <p className="text-[11px] text-neutral-400 max-w-md text-center">
+                    {searchQuery || activeField
+                      ? 'Try a different search term or clear the filters above.'
+                      : 'Click retry to fetch live events from Polymarket.'}
+                  </p>
+                  <button
+                    className="px-4 py-2 border border-purple-300 text-purple-600 font-mono text-[10px] uppercase tracking-widest hover:bg-purple-50 transition-all"
+                    onClick={() => {
+                      setSearchInput('');
+                      setSearchQuery('');
+                      setActiveField(null);
+                      loadPolymarketEvents({ search: '' });
+                    }}
+                  >
+                    {searchQuery || activeField ? 'Clear & Reload' : 'Retry'}
+                  </button>
+                </div>
+              )}
+
+              {/* Events grid */}
+              {!loadingPoly && filteredPolyEvents.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {filteredPolyEvents.map((event, i) => renderPolyCard(event, i))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
 

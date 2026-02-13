@@ -28,6 +28,8 @@
     "hardhat": "^2.28.4"
   },
   "dependencies": {
+    "@upstash/ratelimit": "^2.0.8",
+    "@vercel/kv": "^3.0.0",
     "dotenv": "^16.3.1",
     "ethers": "^6.10.0"
   }

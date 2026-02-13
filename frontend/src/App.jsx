@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ethers } from 'ethers';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wallet, ChevronDown, ExternalLink, Plus, LogOut, User as UserIcon, Settings } from 'lucide-react';
-import { CONTRACTS, NETWORKS, ABIS, PRIVY_APP_ID } from './config';
+import { CONTRACTS, NETWORKS, ABIS, PRIVY_APP_ID, BACKEND_URL } from './config';
 import { loadInitialGraph } from './utils/semanticScholar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -650,11 +650,11 @@ function AppCore({ privyState = null, privyWallets = [] }) {
           <div className="mt-8 md:mt-0 font-mono text-xs text-neutral-500 grid grid-cols-2 gap-8">
             <div>
               <h5 className="text-white mb-3 uppercase tracking-widest">Protocol</h5>
-              <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors mb-1">
+              <a href="https://github.com/rexheng/the-republic" target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors mb-1">
                 GitHub
               </a>
-              <span className="block mb-1">Documentation</span>
-              <span className="block">Whitepaper</span>
+              <a href="https://github.com/rexheng/the-republic#readme" target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors mb-1">Documentation</a>
+              <a href="https://github.com/rexheng/the-republic/blob/main/SECURITY_GUIDE.md" target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">Security Guide</a>
             </div>
             <div>
               <h5 className="text-white mb-3 uppercase tracking-widest">Networks</h5>
