@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **The Republic** is a decentralized research knowledge graph and academic publishing platform. It combines Flare Network oracles, Plasma Network USDC payments, AI agent swarms with TRiSM safety guardrails, LMSR prediction markets, and knowledge graph visualization.
 
-Live demo: https://knowledge-graph-delta.vercel.app
+Live demo: https://the-republic-ashy.vercel.app/
 
 ## Commands
 

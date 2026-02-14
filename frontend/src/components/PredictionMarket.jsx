@@ -195,6 +195,9 @@ function PredictionMarket({ contracts, account }) {
   const [markets, setMarkets] = useState(DEMO_MARKETS);
   const [polymarketEvents, setPolymarketEvents] = useState([]);
   const [loadingPoly, setLoadingPoly] = useState(false);
+  const [polyPage, setPolyPage] = useState(1);
+  const [polyTotal, setPolyTotal] = useState(0);
+  const [polyTags, setPolyTags] = useState([]);
   // Paper search state per market
   const [paperResults, setPaperResults] = useState({});
   const [loadingPapers, setLoadingPapers] = useState({});
@@ -210,18 +213,27 @@ function PredictionMarket({ contracts, account }) {
   const loadPolymarketEvents = useCallback(async (opts = {}) => {
     setLoadingPoly(true);
     try {
-      const events = await fetchPolymarketEvents({
-        limit: 30,
-        search: opts.search || searchQuery,
-        tag: opts.tag || '',
-      });
-      setPolymarketEvents(events);
+      const orderMap = {
+        volume: 'volume24hr',
+        liquidity: 'liquidity',
+        newest: 'endDate',
+      };
+      const order = orderMap[sortBy] || 'volume24hr';
+      const page = opts.page || polyPage || 1;
+      const tag = opts.tag || '';
+      const search = typeof opts.search !== 'undefined' ? opts.search : searchQuery;
+
+      const payload = await fetchPolymarketEvents({ limit: 30, search, tag, order, page });
+      setPolymarketEvents(payload.items || []);
+      setPolyTotal(payload.total || 0);
+      setPolyTags(payload.tags || []);
+      setPolyPage(payload.page || page);
     } catch (err) {
       console.error('Polymarket fetch failed:', err);
     } finally {
       setLoadingPoly(false);
     }
-  }, [searchQuery]);
+  }, [searchQuery, sortBy, polyPage]);
 
   useEffect(() => {
     if (source === 'polymarket' && polymarketEvents.length === 0) {
@@ -233,8 +245,21 @@ function PredictionMarket({ contracts, account }) {
   const handleSearch = useCallback((e) => {
     e?.preventDefault?.();
     setSearchQuery(searchInput);
-    loadPolymarketEvents({ search: searchInput });
+    setPolyPage(1);
+    loadPolymarketEvents({ search: searchInput, page: 1 });
   }, [searchInput, loadPolymarketEvents]);
+
+  // Debounced live search: when the user types, trigger a search after delay
+  useEffect(() => {
+    const id = setTimeout(() => {
+      if (searchInput !== searchQuery) {
+        setSearchQuery(searchInput);
+        setPolyPage(1);
+        loadPolymarketEvents({ search: searchInput, page: 1 });
+      }
+    }, 350);
+    return () => clearTimeout(id);
+  }, [searchInput]);
 
   // Handle field filter
   const handleFieldFilter = useCallback((field) => {
@@ -242,11 +267,13 @@ function PredictionMarket({ contracts, account }) {
       setActiveField(null);
       setSearchQuery('');
       setSearchInput('');
+      setPolyPage(1);
       loadPolymarketEvents({ search: '' });
     } else {
       setActiveField(field);
       setSearchInput(field);
       setSearchQuery(field);
+      setPolyPage(1);
       loadPolymarketEvents({ search: field });
     }
   }, [activeField, loadPolymarketEvents]);
@@ -788,7 +815,7 @@ function PredictionMarket({ contracts, account }) {
                       {searchInput && (
                         <button
                           type="button"
-                          onClick={() => { setSearchInput(''); setSearchQuery(''); setActiveField(null); loadPolymarketEvents({ search: '' }); }}
+                          onClick={() => { setSearchInput(''); setSearchQuery(''); setActiveField(null); setPolyPage(1); loadPolymarketEvents({ search: '', page: 1 }); }}
                           className="absolute right-3 top-1/2 transform -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
                         >
                           <X className="h-3.5 w-3.5" />
@@ -841,6 +868,40 @@ function PredictionMarket({ contracts, account }) {
                     ))}
                     <span className="ml-auto text-neutral-300">{filteredPolyEvents.length} events</span>
                   </div>
+                  {/* Pagination controls */}
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      className="px-2 py-1 text-[9px] font-mono border bg-white"
+                      onClick={() => {
+                        if (polyPage > 1) {
+                          setPolyPage(p => Math.max(1, p - 1));
+                          loadPolymarketEvents({ page: polyPage - 1 });
+                        }
+                      }}
+                      disabled={polyPage <= 1}
+                    >
+                      Prev
+                    </button>
+                    <div className="text-[9px] font-mono text-neutral-500">Page {polyPage} {polyTotal ? `of ${Math.ceil(polyTotal / 30)}` : ''}</div>
+                    <button
+                      className="px-2 py-1 text-[9px] font-mono border bg-white"
+                      onClick={() => {
+                        const maxPage = polyTotal ? Math.max(1, Math.ceil(polyTotal / 30)) : polyPage + 1;
+                        setPolyPage(p => Math.min(maxPage, p + 1));
+                        loadPolymarketEvents({ page: polyPage + 1 });
+                      }}
+                      disabled={polyTotal && polyPage >= Math.ceil(polyTotal / 30)}
+                    >
+                      Next
+                    </button>
+                    {polyTags && polyTags.length > 0 && (
+                      <div className="ml-auto flex items-center gap-1 text-[9px] font-mono text-neutral-500">
+                        <span className="uppercase">Tags:</span>
+                        {polyTags.slice(0, 6).map(t => (
+                          <button key={t} onClick={() => { setPolyPage(1); loadPolymarketEvents({ tag: t }); }} className="px-2 py-1 text-[9px] font-mono border bg-white">{t}</button>
+                        ))}
+                      </div>
+                    )}
                 </div>
               </FadeIn>
 

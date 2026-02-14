@@ -17,60 +17,53 @@ function parseJsonField(raw, fallback = []) {
 }
 
 async function fetchEventsRaw(limit, { search = '', tag = '' } = {}) {
-  // Try same-origin proxy first (works on Vercel + Vite dev proxy)
+  // Always use same-origin proxy to avoid CORS and ensure dev/prod parity.
   const params = new URLSearchParams({ limit: String(limit) });
   if (search) params.set('search', search);
   if (tag) params.set('tag', tag);
-
-  try {
-    const res = await fetch(`/api/polymarket/events?${params.toString()}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) return data;
-    }
-  } catch {}
-
-  // Fallback: direct fetch to gamma API (may fail due to CORS in browser)
-  try {
-    const directParams = new URLSearchParams({
-      closed: 'false',
-      active: 'true',
-      limit: String(limit),
-      order: 'volume24hr',
-      ascending: 'false',
-    });
-    if (tag) directParams.set('tag', tag);
-
-    const res = await fetch(`${GAMMA_API}/events?${directParams.toString()}`);
-    if (res.ok) {
-      let data = await res.json();
-      if (Array.isArray(data)) {
-        // Client-side search filter for direct fetch
-        if (search) {
-          const q = search.toLowerCase();
-          data = data.filter(event => {
-            const haystack = [
-              event.title,
-              event.description,
-              ...(event.markets || []).map(m => m.question),
-            ].join(' ').toLowerCase();
-            return q.split(/\s+/).every(word => haystack.includes(word));
-          });
-        }
-        return data;
-      }
-    }
-  } catch {}
-
-  return [];
+  // Keep optional ordering & pagination; callers may add them to opts
+  return fetch(`/api/polymarket/events?${params.toString()}`)
+    .then(async (res) => {
+      if (!res.ok) return { items: [], total: 0, page: 1, limit };
+      const json = await res.json();
+      // Support both legacy array responses and new { items } shape
+      if (Array.isArray(json)) return { items: json.slice(0, limit), total: json.length, page: 1, limit };
+      return {
+        items: Array.isArray(json.items) ? json.items : [],
+        total: typeof json.total === 'number' ? json.total : (Array.isArray(json.items) ? json.items.length : 0),
+        page: typeof json.page === 'number' ? json.page : 1,
+        limit: typeof json.limit === 'number' ? json.limit : limit,
+        tags: Array.isArray(json.tags) ? json.tags : [],
+      };
+    })
+    .catch(() => ({ items: [], total: 0, page: 1, limit }));
 }
 
-export async function fetchPolymarketEvents({ limit = 30, search = '', tag = '' } = {}) {
+export async function fetchPolymarketEvents({ limit = 30, search = '', tag = '', order = 'volume24hr', page = 1 } = {}) {
   try {
-    const events = await fetchEventsRaw(limit, { search, tag });
-    if (events.length === 0) return [];
+    // Attach order & page to the proxy call
+    const params = new URLSearchParams({ limit: String(limit), order, page: String(page) });
+    if (search) params.set('search', search);
+    if (tag) params.set('tag', tag);
 
-    return events.slice(0, limit).map((event) => {
+    const res = await fetch(`/api/polymarket/events?${params.toString()}`);
+    let payload = { items: [], total: 0, page, limit };
+    if (res.ok) {
+      const json = await res.json();
+      if (Array.isArray(json)) payload = { items: json.slice(0, limit), total: json.length, page, limit };
+      else payload = {
+        items: Array.isArray(json.items) ? json.items : [],
+        total: typeof json.total === 'number' ? json.total : (Array.isArray(json.items) ? json.items.length : 0),
+        page: typeof json.page === 'number' ? json.page : page,
+        limit: typeof json.limit === 'number' ? json.limit : limit,
+        tags: Array.isArray(json.tags) ? json.tags : [],
+      };
+    }
+
+    const events = payload.items || [];
+    if (events.length === 0) return { items: [], total: payload.total || 0, page: payload.page || page, limit: payload.limit || limit, tags: payload.tags || [] };
+
+    const mapped = events.slice(0, limit).map((event) => {
       const market = event.markets?.[0];
       let outcomes = ["Yes", "No"];
       let outcomePrices = [0.5, 0.5];
@@ -86,7 +79,8 @@ export async function fetchPolymarketEvents({ limit = 30, search = '', tag = '' 
       const yesPrice = outcomePrices[0] || 0.5;
 
       // Detect academic fields for this event
-      const fields = detectEventFields(event);
+      // If server supplied `fields`, use that; otherwise compute locally
+      const fields = event.fields || detectEventFields(event);
 
       return {
         id: `poly_${event.id}`,
@@ -113,9 +107,11 @@ export async function fetchPolymarketEvents({ limit = 30, search = '', tag = '' 
         marketsCount: (event.markets || []).length,
       };
     });
+
+    return { items: mapped, total: payload.total || mapped.length, page: payload.page || page, limit: payload.limit || limit, tags: payload.tags || [] };
   } catch (err) {
     console.error("Polymarket fetch failed:", err);
-    return [];
+    return { items: [], total: 0, page: 1, limit };
   }
 }
 

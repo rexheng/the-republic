@@ -28,11 +28,9 @@ export default defineConfig({
       '/api/polymarket': {
         target: 'https://gamma-api.polymarket.com',
         changeOrigin: true,
-        rewrite: (path) => {
-          const url = new URL(path, 'http://localhost');
-          const limit = url.searchParams.get('limit') || 30;
-          return `/events?closed=false&active=true&limit=${limit}&order=volume24hr&ascending=false`;
-        },
+        // Preserve incoming query string and simply rewrite the prefix so
+        // dev requests forward whatever params the client sets (search, tag, page, order, etc.)
+        rewrite: (p) => p.replace(/^\/api\/polymarket/, '/events'),
       },
       '/api': {
         target: 'http://localhost:3001',
