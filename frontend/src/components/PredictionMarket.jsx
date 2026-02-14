@@ -902,6 +902,7 @@ function PredictionMarket({ contracts, account }) {
                         ))}
                       </div>
                     )}
+                  </div>
                 </div>
               </FadeIn>
 
