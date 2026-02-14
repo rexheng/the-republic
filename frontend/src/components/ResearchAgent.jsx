@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 
 const PROVIDER_STORAGE = 'rg_llm_provider';
 const MODEL_STORAGE = 'rg_llm_model';
+const HISTORY_STORAGE = 'rg_navigator_history';
 
 // ============================================================
 // Parse LLM output: extract [SEARCH:...] actions, strip IDs/markdown
@@ -170,7 +171,14 @@ const STARTERS = [
 // ============================================================
 
 function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(() => {
+    try {
+      const raw = localStorage.getItem(HISTORY_STORAGE);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [searchingPapers, setSearchingPapers] = useState(false);
@@ -182,6 +190,15 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Persist messages so navigator history survives tab close
+  useEffect(() => {
+    try {
+      localStorage.setItem(HISTORY_STORAGE, JSON.stringify(messages));
+    } catch (e) {
+      // ignore
+    }
   }, [messages]);
 
   useEffect(() => {
@@ -380,17 +397,29 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-neutral-200">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-xs font-bold uppercase tracking-widest">Navigator</span>
-          <Badge variant="outline" className="font-mono text-[9px] h-4">{PROVIDERS[provider]?.label || provider}</Badge>
-        </div>
-        <div className="flex items-center gap-1">
-          <button className="text-neutral-400 hover:text-neutral-900 transition-colors p-1" onClick={() => setShowSettings(!showSettings)} aria-label="Settings">
-            <Settings className="h-3.5 w-3.5" />
-          </button>
-          <button className="text-neutral-400 hover:text-neutral-900 transition-colors p-1" onClick={onClose} aria-label="Close">
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+            <span className="font-mono text-xs font-bold uppercase tracking-widest">Navigator</span>
+            <Badge variant="outline" className="font-mono text-[9px] h-4">{PROVIDERS[provider]?.label || provider}</Badge>
+          </div>
+          <div className="flex items-center gap-1">
+            <button className="text-neutral-400 hover:text-neutral-900 transition-colors p-1" onClick={() => setShowSettings(!showSettings)} aria-label="Settings">
+              <Settings className="h-3.5 w-3.5" />
+            </button>
+            <button
+              className="text-neutral-400 hover:text-neutral-900 transition-colors p-1 text-[11px] font-mono"
+              onClick={() => {
+                if (confirm('Clear navigator history?')) {
+                  setMessages([]);
+                  try { localStorage.removeItem(HISTORY_STORAGE); } catch {}
+                }
+              }}
+              aria-label="Clear history"
+            >
+              Clear
+            </button>
+            <button className="text-neutral-400 hover:text-neutral-900 transition-colors p-1" onClick={onClose} aria-label="Close">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
       </div>
 
       {/* Settings */}
