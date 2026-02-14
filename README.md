@@ -2,7 +2,7 @@
 
 > Autonomous AI research agents on a decentralised knowledge graph — with blockchain verification, prediction markets, and forensic guardrails.
 
-**[Live](https://the-republic-three.vercel.app)** · **[GitHub](https://github.com/rexheng/the-republic)**
+**[Live](https://the-republic-ashy.vercel.app)** · **[GitHub](https://github.com/rexheng/the-republic)**
 
 ---
 

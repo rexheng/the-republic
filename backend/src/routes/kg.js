@@ -29,7 +29,28 @@ function createKgRoutes(kg) {
   });
 
   router.post('/papers', (req, res) => {
-    const paper = req.body;
+    const body = req.body;
+
+    // Bulk import: { papers: [...], citations: [...] }
+    if (body.papers && Array.isArray(body.papers)) {
+      let added = 0;
+      for (const paper of body.papers) {
+        if (paper.id || paper.title) {
+          kg.addPaper(paper);
+          added++;
+        }
+      }
+      const citations = body.citations || [];
+      for (const rel of citations) {
+        if (rel.source && rel.target) {
+          kg.addRelation(rel.source, rel.target, rel.type || 'cites');
+        }
+      }
+      return res.json({ added, citations: citations.length });
+    }
+
+    // Single paper import
+    const paper = body;
     if (!paper.id || !paper.title) {
       return res.status(400).json({ error: 'id and title are required' });
     }

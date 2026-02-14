@@ -108,7 +108,27 @@ function AppCore({ privyState = null, privyWallets = [] }) {
   useEffect(() => {
     if (graphLoaded.current) return;
     graphLoaded.current = true;
-    loadInitialGraph().then(data => setGraphData(data));
+    loadInitialGraph().then(data => {
+      // Use functional updater to merge with any papers imported before this resolved
+      setGraphData(prev => {
+        if (prev.nodes.length === 0) return data;
+        // Merge: keep user-imported papers, add seed/live data that isn't already present
+        const nodeMap = new Map();
+        data.nodes.forEach(n => nodeMap.set(n.id, n));
+        prev.nodes.forEach(n => nodeMap.set(n.id, n)); // user imports take precedence
+        const linkSet = new Set();
+        const allLinks = [];
+        const addLink = (l) => {
+          const src = typeof l.source === 'object' ? l.source.id : l.source;
+          const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+          const key = `${src}->${tgt}`;
+          if (!linkSet.has(key)) { linkSet.add(key); allLinks.push(l); }
+        };
+        data.links.forEach(addLink);
+        prev.links.forEach(addLink);
+        return { nodes: Array.from(nodeMap.values()), links: allLinks };
+      });
+    });
   }, []);
 
   // Track mode from URL
@@ -617,7 +637,7 @@ function AppCore({ privyState = null, privyWallets = [] }) {
               </TabsContent>
               <TabsContent value="lab">
                 <TabErrorBoundary name="AI Research Lab">
-                  <AIResearchLab labPaper={labPaper} />
+                  <AIResearchLab labPaper={labPaper} userPapers={graphData.nodes} />
                 </TabErrorBoundary>
               </TabsContent>
               <TabsContent value="kaggle">

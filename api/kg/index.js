@@ -153,9 +153,34 @@ export default async function handler(req, res) {
     }
   }
 
-  // POST — add paper
+  // POST — add paper(s)
   if (req.method === 'POST') {
-    const paper = req.body;
+    const body = req.body;
+
+    // Bulk import: { papers: [...], citations: [...] }
+    if (body.papers && Array.isArray(body.papers)) {
+      const papers = body.papers;
+      const citations = body.citations || [];
+      let added = 0;
+
+      for (const paper of papers) {
+        if (paper.id && paper.title) {
+          await addPaper(paper);
+          added++;
+        }
+      }
+
+      for (const rel of citations) {
+        if (rel.source && rel.target) {
+          await addRelation(rel);
+        }
+      }
+
+      return res.status(200).json({ added, citations: citations.length, persistent: !!kv });
+    }
+
+    // Single paper import
+    const paper = body;
     if (!paper.id || !paper.title) {
       return res.status(400).json({ error: 'id and title are required' });
     }

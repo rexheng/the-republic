@@ -337,6 +337,10 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
 
   // Import papers + citations from JSON or bulk sources
   const handleImportPapers = useCallback((papers, citations = []) => {
+    if (!papers || papers.length === 0) return;
+
+    let newCount = 0;
+
     setGraphData(prev => {
       const nodeMap = new Map();
       prev.nodes.forEach(n => nodeMap.set(n.id, n));
@@ -348,6 +352,7 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
             val: p.val || Math.max(2, Math.log10((p.citationCount || 1) + 1) * 3),
             source: p.source || 'imported',
           });
+          newCount++;
         }
       });
       const linkSet = new Set();
@@ -370,6 +375,30 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
       });
       return { nodes: Array.from(nodeMap.values()), links: allLinks };
     });
+
+    // Reheat the force simulation so new nodes spread out properly
+    setTimeout(() => {
+      if (fgRef.current) {
+        fgRef.current.d3ReheatSimulation();
+        // Zoom to fit all nodes after a brief layout period
+        setTimeout(() => {
+          if (fgRef.current) {
+            fgRef.current.zoomToFit(400, 40);
+          }
+        }, 600);
+      }
+    }, 100);
+
+    // Fire-and-forget: persist new papers to the KG API
+    if (newCount > 0) {
+      try {
+        fetch('/api/kg?action=bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ papers, citations }),
+        }).catch(() => { /* API persistence is best-effort */ });
+      } catch { /* ignore */ }
+    }
   }, []);
 
   // Remove a single paper (and its links) from the graph
@@ -542,6 +571,11 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
     const years = graphData.nodes.map(n => n.year).filter(Boolean);
     if (years.length === 0) return { min: 1990, max: 2026 };
     return { min: Math.min(...years), max: Math.max(...years) };
+  }, [graphData.nodes]);
+
+  // Set of existing node IDs — passed to SamplesTab for duplicate detection
+  const existingNodeIds = useMemo(() => {
+    return new Set(graphData.nodes.map(n => n.id));
   }, [graphData.nodes]);
 
   // Compute max citation count from data
@@ -804,6 +838,7 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
           onImportJSON={handleImportPapers}
           onImportBulk={handleImportPapers}
           anchorRef={addBtnRef}
+          existingNodeIds={existingNodeIds}
         />
 
         <Button
