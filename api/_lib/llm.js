@@ -123,3 +123,80 @@ export async function callLLM({ provider, model, systemPrompt, messages, maxToke
     return data.choices?.[0]?.message?.content || '';
   }
 }
+
+// ─── Embeddings ─────────────────────────────────────────────────────────────
+
+export async function getEmbeddings({ texts, userApiKey }) {
+  if (!texts || !Array.isArray(texts) || texts.length === 0) {
+    throw new Error('texts array is required');
+  }
+
+  // Determine which embedding provider to use based on available keys
+  const geminiKey = userApiKey?.startsWith('AIza') ? userApiKey : process.env.GEMINI_API_KEY;
+  const openaiKey = userApiKey?.startsWith('sk-') ? userApiKey : process.env.OPENAI_API_KEY;
+
+  if (geminiKey) {
+    return getGeminiEmbeddings(texts, geminiKey);
+  } else if (openaiKey) {
+    return getOpenAIEmbeddings(texts, openaiKey);
+  }
+
+  throw new Error('No embedding API key available. Set GEMINI_API_KEY or OPENAI_API_KEY.');
+}
+
+async function getGeminiEmbeddings(texts, apiKey) {
+  const model = 'text-embedding-004';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:batchEmbedContents?key=${apiKey}`;
+
+  // Gemini batch embed: up to 100 texts per request
+  const allEmbeddings = [];
+  for (let i = 0; i < texts.length; i += 100) {
+    const batch = texts.slice(i, i + 100);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requests: batch.map(text => ({
+          model: `models/${model}`,
+          content: { parts: [{ text }] },
+          taskType: 'RETRIEVAL_DOCUMENT',
+        })),
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      throw new Error(`Gemini embedding error (${response.status}): ${errBody.slice(0, 300)}`);
+    }
+
+    const data = await response.json();
+    const vectors = (data.embeddings || []).map(e => e.values);
+    allEmbeddings.push(...vectors);
+  }
+
+  return allEmbeddings;
+}
+
+async function getOpenAIEmbeddings(texts, apiKey) {
+  const response = await fetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'text-embedding-3-small',
+      input: texts,
+    }),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`OpenAI embedding error (${response.status}): ${errBody.slice(0, 300)}`);
+  }
+
+  const data = await response.json();
+  return (data.data || [])
+    .sort((a, b) => a.index - b.index)
+    .map(d => d.embedding);
+}

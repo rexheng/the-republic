@@ -1,5 +1,8 @@
 // RAG retrieval engine for the Research Navigator AI
 // Searches in-memory graph data — no external API calls needed for retrieval
+// Supports hybrid search: TF-IDF keyword scoring + embedding-based semantic search
+
+import { getStoredApiKey } from './llm';
 
 // ============================================================
 // Text search: simple TF-IDF-style keyword scoring
@@ -50,6 +53,108 @@ export function searchByKeywords(query, papers, limit = 20) {
     .slice(0, limit);
 
   return scored;
+}
+
+// ============================================================
+// Embedding-based semantic search
+// ============================================================
+
+// Module-level embedding cache: paperId -> Float32Array
+const embeddingCache = new Map();
+let embeddingsAvailable = null; // null = untested, true/false after first attempt
+
+// Cosine similarity between two vectors
+function cosineSimilarity(a, b) {
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+// Call the embedding API endpoint
+async function fetchEmbeddings(texts) {
+  const userApiKey = getStoredApiKey();
+  const response = await fetch('/api/llm/embed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ texts, ...(userApiKey ? { userApiKey } : {}) }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+    throw new Error(err.error || `Embedding error ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.embeddings;
+}
+
+// Build or update the embedding index for a set of papers
+export async function buildEmbeddingIndex(papers) {
+  if (embeddingsAvailable === false) return; // previously failed, don't retry
+
+  // Find papers not yet embedded
+  const toEmbed = papers.filter(p => !embeddingCache.has(p.id) && (p.title || p.abstract));
+  if (toEmbed.length === 0) return;
+
+  try {
+    // Batch in groups of 80 (under Gemini's 100 limit with margin)
+    for (let i = 0; i < toEmbed.length; i += 80) {
+      const batch = toEmbed.slice(i, i + 80);
+      const texts = batch.map(p => {
+        const title = p.title || '';
+        const abstract = (p.abstract || '').slice(0, 500);
+        return `${title}. ${abstract}`.trim();
+      });
+
+      const vectors = await fetchEmbeddings(texts);
+      for (let j = 0; j < batch.length; j++) {
+        if (vectors[j]) {
+          embeddingCache.set(batch[j].id, new Float32Array(vectors[j]));
+        }
+      }
+    }
+    embeddingsAvailable = true;
+  } catch (e) {
+    console.warn('Embedding index build failed, falling back to keyword search:', e.message);
+    embeddingsAvailable = false;
+  }
+}
+
+// Embed a single query text
+async function embedQuery(text) {
+  if (embeddingsAvailable === false) return null;
+  try {
+    const vectors = await fetchEmbeddings([text]);
+    embeddingsAvailable = true;
+    return vectors[0] ? new Float32Array(vectors[0]) : null;
+  } catch (e) {
+    console.warn('Query embedding failed:', e.message);
+    embeddingsAvailable = false;
+    return null;
+  }
+}
+
+// Search papers by embedding similarity
+function searchByEmbeddings(queryVector, papers, limit = 20) {
+  if (!queryVector) return [];
+
+  const scored = [];
+  for (const paper of papers) {
+    const paperVec = embeddingCache.get(paper.id);
+    if (!paperVec) continue;
+    const sim = cosineSimilarity(queryVector, paperVec);
+    if (sim > 0.1) { // minimum similarity threshold
+      scored.push({ paper, score: sim });
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit);
 }
 
 // ============================================================
@@ -205,49 +310,106 @@ export function formatPaperForContext(paper, index) {
   const fields = (paper.fieldsOfStudy || []).join(', ') || 'Unknown';
   const authors = (paper.authors || []).slice(0, 3).join(', ');
   const abstract = (paper.abstract || '').slice(0, 200);
-  return `[${index + 1}] "${paper.title}" (${paper.year || '?'}) by ${authors}
+  const sourceTag = paper.source === 'external' ? ' [EXTERNAL]' : '';
+  return `[${index + 1}] "${paper.title}" (${paper.year || '?'}) by ${authors}${sourceTag}
    ID: ${paper.id} | Citations: ${(paper.citationCount || 0).toLocaleString()} | Fields: ${fields}${abstract ? `\n   Abstract: ${abstract}...` : ''}`;
 }
 
-export function buildSystemPrompt(graphData) {
+export function buildSystemPrompt(graphData, { hasExternalPapers = false } = {}) {
   const n = graphData.nodes.length;
   const e = graphData.links.length;
   const fields = getFieldDistribution(graphData.nodes);
+
+  let externalNote = '';
+  if (hasExternalPapers) {
+    externalNote = `\n\nEXTERNAL SOURCES:
+Some papers below are marked [EXTERNAL] — these come from Semantic Scholar because the knowledge graph had limited coverage on this topic. Prioritize papers from the user's knowledge graph when available, but use external papers to fill gaps. When citing external papers, mention that they are from external sources.`;
+  }
 
   return `You are a research assistant with access to ${n.toLocaleString()} academic papers and ${e.toLocaleString()} citation links.
 
 Fields: ${fields.slice(0, 6).map(([f, c]) => `${f} (${c})`).join(', ')}
 
 RESPONSE FORMAT:
-- Answer in 2-4 concise sentences. Be direct and insightful.
-- Cite papers using their number: [1], [2], etc. matching the RELEVANT PAPERS list.
-- Only cite papers you actually reference. Do not list all papers.
-- Do NOT include paper titles, citation counts, author names, IDs, or any metadata in your text — these are shown automatically below your answer.
-- Do NOT use markdown formatting (no ##, **, *, -).
+Respond with two labelled sections:
+
+ANSWER: A direct 2-4 sentence answer to the user's question. Cite papers using [1], [2], etc. matching the RELEVANT PAPERS list. Be direct and insightful. Only cite papers you actually reference. Do not include paper titles, citation counts, author names, IDs, or any metadata in your text — these are shown automatically below your answer. Do NOT use markdown formatting (no ##, **, *, -).
+
+EVIDENCE: 1-2 sentences highlighting the single most important piece of supporting evidence from the cited papers and why it matters for the user's question.
 
 SEARCH ACTION:
-If the user asks about a topic not covered by the papers in context, include [SEARCH:topic] to fetch papers from Semantic Scholar and add them to the graph.
+If the user asks about a topic not covered by the papers in context, include [SEARCH:topic] to fetch papers from Semantic Scholar and add them to the graph.${externalNote}
 
 Example good response:
-"Transformer architectures revolutionized NLP by replacing recurrence with self-attention [1], enabling parallel training at scale. This led to pretrained models like BERT [3] and GPT [2] that achieve state-of-the-art results across tasks through transfer learning."`;
+ANSWER: Transformer architectures revolutionized NLP by replacing recurrence with self-attention [1], enabling parallel training at scale. This led to pretrained models like BERT [3] and GPT [2] that achieve state-of-the-art results across tasks through transfer learning.
+
+EVIDENCE: The original Transformer paper [1] demonstrated that attention-only models could outperform RNN-based seq2seq on machine translation while training significantly faster, establishing the foundation for all subsequent large language models.`;
 }
 
-export function assembleContext(query, graphData) {
+// Hybrid search: combines keyword and semantic results
+export async function assembleContext(query, graphData) {
   // 1. Keyword search
-  const results = searchByKeywords(query, graphData.nodes, 15);
-  const relevantIds = results.map(r => r.paper.id);
+  const keywordResults = searchByKeywords(query, graphData.nodes, 15);
 
-  // 2. Expand by 1 citation hop for related context
+  // 2. Semantic search (if embeddings are available)
+  let semanticResults = [];
+  const queryVector = await embedQuery(query);
+  if (queryVector) {
+    semanticResults = searchByEmbeddings(queryVector, graphData.nodes, 15);
+  }
+
+  // 3. Hybrid merge: combine and deduplicate
+  const mergedScores = new Map(); // paperId -> { paper, keywordScore, semanticScore }
+
+  // Normalize keyword scores to [0, 1]
+  const maxKeyword = keywordResults.length > 0 ? keywordResults[0].score : 1;
+  for (const r of keywordResults) {
+    mergedScores.set(r.paper.id, {
+      paper: r.paper,
+      keywordScore: r.score / maxKeyword,
+      semanticScore: 0,
+    });
+  }
+
+  // Normalize semantic scores (already [0, 1] from cosine similarity)
+  for (const r of semanticResults) {
+    const existing = mergedScores.get(r.paper.id);
+    if (existing) {
+      existing.semanticScore = r.score;
+    } else {
+      mergedScores.set(r.paper.id, {
+        paper: r.paper,
+        keywordScore: 0,
+        semanticScore: r.score,
+      });
+    }
+  }
+
+  // Combined score: weighted blend
+  const KEYWORD_WEIGHT = 0.4;
+  const SEMANTIC_WEIGHT = 0.6;
+  const ranked = Array.from(mergedScores.values())
+    .map(entry => ({
+      paper: entry.paper,
+      score: (entry.keywordScore * KEYWORD_WEIGHT) + (entry.semanticScore * SEMANTIC_WEIGHT),
+      keywordScore: entry.keywordScore,
+      semanticScore: entry.semanticScore,
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 15);
+
+  const relevantIds = ranked.map(r => r.paper.id);
+
+  // 4. Expand by 1 citation hop for related context
   const expandedIds = expandByCitations(relevantIds, graphData, 1);
 
-  // 3. Get expanded papers, ranked by original score + citation importance
+  // 5. Build context papers list
   const paperMap = new Map(graphData.nodes.map(n => [n.id, n]));
   const contextPapers = [];
-  const maxScore = results.length > 0 ? results[0].score : 1;
 
   // First: directly matched papers (with relevance scores)
-  for (const r of results) {
-    contextPapers.push({ ...r.paper, relevanceScore: r.score / maxScore });
+  for (const r of ranked) {
+    contextPapers.push({ ...r.paper, relevanceScore: r.score });
   }
 
   // Then: citation neighbors (top by citations, capped)
@@ -264,6 +426,10 @@ export function assembleContext(query, graphData) {
     relevanceScore: Math.max(0.1, 0.4 - i * 0.03), // citation neighbors get lower relevance
   })));
 
+  // 6. Detect sparse coverage
+  const topScore = ranked.length > 0 ? ranked[0].score : 0;
+  const coverageSparse = ranked.length < 3 || topScore < 0.15;
+
   // Format for LLM
   const paperContext = contextPapers
     .slice(0, 25)
@@ -274,5 +440,6 @@ export function assembleContext(query, graphData) {
     paperContext,
     relevantPaperIds: relevantIds,
     contextPapers: contextPapers.slice(0, 25),
+    coverageSparse,
   };
 }

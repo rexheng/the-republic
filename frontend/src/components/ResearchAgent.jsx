@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Settings, X, ArrowUp, ExternalLink, Eye, BookOpen } from 'lucide-react';
-import { buildSystemPrompt, assembleContext, findCitationPath } from '../utils/ragRetrieval';
+import { Settings, X, ArrowUp, ExternalLink, Eye, BookOpen, Globe } from 'lucide-react';
+import { buildSystemPrompt, assembleContext, findCitationPath, buildEmbeddingIndex } from '../utils/ragRetrieval';
 import { PROVIDERS, callLLM, hasStoredApiKey, openApiSettings } from '../utils/llm';
 import { searchPapers, buildGraphFromPapers } from '../utils/semanticScholar';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ const MODEL_STORAGE = 'rg_llm_model';
 const HISTORY_STORAGE = 'rg_navigator_history';
 
 // ============================================================
-// Parse LLM output: extract [SEARCH:...] actions, strip IDs/markdown
+// Parse LLM output: extract structured sections, actions, citations
 // ============================================================
 
 function parseResponse(text) {
@@ -33,18 +33,33 @@ function parseResponse(text) {
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
   cleaned = cleaned.split('\n').map(l => l.trim()).join('\n').trim();
 
+  // Extract structured sections: ANSWER and EVIDENCE
+  let answer = cleaned;
+  let evidence = '';
+
+  const answerMatch = cleaned.match(/^ANSWER:\s*([\s\S]*?)(?=\nEVIDENCE:|$)/i);
+  const evidenceMatch = cleaned.match(/EVIDENCE:\s*([\s\S]*?)$/i);
+
+  if (answerMatch) {
+    answer = answerMatch[1].trim();
+    if (evidenceMatch) {
+      evidence = evidenceMatch[1].trim();
+    }
+  }
+
   // Extract cited paper numbers [1], [2], [1,3], etc.
   const citedSet = new Set();
   const citationRegex = /\[(\d+(?:,\s*\d+)*)\]/g;
   let match;
-  while ((match = citationRegex.exec(cleaned)) !== null) {
+  const allText = answer + ' ' + evidence;
+  while ((match = citationRegex.exec(allText)) !== null) {
     match[1].split(',').forEach(n => {
       const num = parseInt(n.trim());
       if (num > 0 && num <= 25) citedSet.add(num);
     });
   }
 
-  return { text: cleaned, actions, citedNumbers: Array.from(citedSet).sort((a, b) => a - b) };
+  return { text: answer, evidence, actions, citedNumbers: Array.from(citedSet).sort((a, b) => a - b) };
 }
 
 // ============================================================
@@ -110,6 +125,7 @@ function CitationCard({ paper, number, onViewInGraph }) {
     : s2Id && !String(s2Id).startsWith('W')
       ? `https://www.semanticscholar.org/paper/${s2Id}`
       : null;
+  const isExternal = paper.source === 'external';
 
   return (
     <div className="flex items-start gap-2 py-1.5 group">
@@ -121,7 +137,12 @@ function CitationCard({ paper, number, onViewInGraph }) {
           <span className="text-xs font-medium text-neutral-800 leading-snug line-clamp-1 flex-1">
             {paper.title}
           </span>
-          <span className="text-[10px] text-neutral-400 flex-shrink-0 whitespace-nowrap">
+          <span className="text-[10px] text-neutral-400 flex-shrink-0 whitespace-nowrap flex items-center gap-1">
+            {isExternal && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] font-mono text-amber-600 bg-amber-50 px-1 rounded">
+                <Globe className="h-2 w-2" />S2
+              </span>
+            )}
             {year} &middot; {citations.toLocaleString()} cit.
           </span>
         </div>
@@ -182,11 +203,14 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [searchingPapers, setSearchingPapers] = useState(false);
+  const [searchingExternal, setSearchingExternal] = useState(false);
+  const [embeddingStatus, setEmbeddingStatus] = useState('idle'); // idle | building | ready | failed
   const [provider, setProvider] = useState(() => localStorage.getItem(PROVIDER_STORAGE) || 'claude');
   const [model, setModel] = useState(() => localStorage.getItem(MODEL_STORAGE) || '');
   const [showSettings, setShowSettings] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const embeddingBuiltRef = useRef(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -204,6 +228,16 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Build embedding index lazily when graph data is available
+  useEffect(() => {
+    if (embeddingBuiltRef.current || !graphData?.nodes?.length) return;
+    embeddingBuiltRef.current = true;
+    setEmbeddingStatus('building');
+    buildEmbeddingIndex(graphData.nodes)
+      .then(() => setEmbeddingStatus('ready'))
+      .catch(() => setEmbeddingStatus('failed'));
+  }, [graphData]);
 
   const saveProvider = useCallback((p) => {
     setProvider(p);
@@ -241,12 +275,56 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
     setLoading(true);
 
     try {
-      const { paperContext, relevantPaperIds, contextPapers } = assembleContext(userMessage, graphData);
+      let { paperContext, relevantPaperIds, contextPapers, coverageSparse } = await assembleContext(userMessage, graphData);
+      let hasExternalPapers = false;
+
       if (relevantPaperIds.length > 0 && onGraphAction) {
         onGraphAction({ type: 'highlight', ids: relevantPaperIds.slice(0, 8) });
       }
 
-      const systemPrompt = buildSystemPrompt(graphData);
+      // Auto-fallback to Semantic Scholar when coverage is sparse
+      if (coverageSparse && onAddPapers) {
+        setSearchingExternal(true);
+        try {
+          const externalResults = await searchPapers(userMessage, 10);
+          if (externalResults.length > 0) {
+            // Tag as external and add to graph
+            const taggedResults = externalResults.map(p => ({ ...p, source: 'external' }));
+            onAddPapers(taggedResults);
+
+            // Embed new papers incrementally
+            buildEmbeddingIndex(taggedResults).catch(() => {});
+
+            // Merge external papers into context
+            const externalContext = taggedResults.slice(0, 8).map(p => ({
+              ...p,
+              relevanceScore: 0.5,
+            }));
+            contextPapers = [...contextPapers, ...externalContext].slice(0, 25);
+
+            // Rebuild paper context string
+            paperContext = contextPapers
+              .map((p, i) => {
+                const fields = (p.fieldsOfStudy || []).join(', ') || 'Unknown';
+                const authors = (p.authors || []).slice(0, 3).join(', ');
+                const abstract = (p.abstract || '').slice(0, 200);
+                const sourceTag = p.source === 'external' ? ' [EXTERNAL]' : '';
+                return `[${i + 1}] "${p.title}" (${p.year || '?'}) by ${authors}${sourceTag}\n   ID: ${p.id} | Citations: ${(p.citationCount || 0).toLocaleString()} | Fields: ${fields}${abstract ? `\n   Abstract: ${abstract}...` : ''}`;
+              })
+              .join('\n\n');
+
+            hasExternalPapers = true;
+
+            const newIds = taggedResults.map(r => r.paperId || r.id);
+            if (onGraphAction) onGraphAction({ type: 'highlight', ids: [...relevantPaperIds.slice(0, 4), ...newIds.slice(0, 4)] });
+          }
+        } catch (e) {
+          console.error('S2 fallback search failed:', e);
+        }
+        setSearchingExternal(false);
+      }
+
+      const systemPrompt = buildSystemPrompt(graphData, { hasExternalPapers });
       const contextMsg = paperContext ? `\n\nRELEVANT PAPERS:\n${paperContext}` : '';
       const chatMessages = [
         ...messages.slice(-4).map(m => ({ role: m.role, content: m.content })),
@@ -255,7 +333,7 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
 
       const rawContent = await callLLM(systemPrompt, chatMessages);
 
-      const { text: cleanContent, actions, citedNumbers } = parseResponse(rawContent);
+      const { text: cleanContent, evidence, actions, citedNumbers } = parseResponse(rawContent);
 
       // Fallback: if parsing stripped everything, use raw content
       const finalContent = cleanContent || rawContent.replace(/\[(?:HIGHLIGHT|ZOOM|PATH|SEARCH):[^\]]*\]/g, '').trim() || 'I found relevant papers but could not generate a summary. See the papers below.';
@@ -268,6 +346,7 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
             const results = await searchPapers(action.query, 10);
             if (results.length > 0) {
               onAddPapers(results);
+              buildEmbeddingIndex(results).catch(() => {});
               const newIds = results.map(r => r.paperId || r.id);
               if (onGraphAction) onGraphAction({ type: 'highlight', ids: newIds });
             }
@@ -291,10 +370,12 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: finalContent,
+        evidence,
         actions,
         papers: contextPapers.slice(0, 15),
         citedPapers,
         citedNumbers: finalCitedNumbers,
+        hasExternalPapers,
       }]);
     } catch (err) {
       const isAuthError = /api key|unauthorized|401|403/i.test(err.message);
@@ -359,6 +440,27 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
             onCitationClick={(n) => handleCitationClick(n, msg.papers || [])}
           />
         </div>
+
+        {/* Evidence section */}
+        {msg.evidence && (
+          <div className="mt-2 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
+            <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-400 block mb-1">Key evidence</span>
+            <div className="text-xs text-neutral-700 leading-relaxed">
+              <CitedText
+                text={msg.evidence}
+                onCitationClick={(n) => handleCitationClick(n, msg.papers || [])}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* External sources indicator */}
+        {msg.hasExternalPapers && (
+          <div className="flex items-center gap-1 mt-1.5">
+            <Globe className="h-2.5 w-2.5 text-amber-500" />
+            <span className="text-[10px] text-amber-600 font-mono">Includes Semantic Scholar results</span>
+          </div>
+        )}
 
         {/* Cited papers — only ones actually referenced */}
         {msg.citedPapers && msg.citedPapers.length > 0 && (
@@ -441,6 +543,10 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
             <span className={hasStoredApiKey() ? 'text-green-600' : 'text-neutral-400'}>
               {hasStoredApiKey() ? 'Key set' : 'Server key'}
             </span>
+            {' '}&middot;{' '}
+            <span className={embeddingStatus === 'ready' ? 'text-green-600' : embeddingStatus === 'building' ? 'text-amber-500' : 'text-neutral-400'}>
+              {embeddingStatus === 'ready' ? 'Semantic search' : embeddingStatus === 'building' ? 'Indexing...' : embeddingStatus === 'failed' ? 'Keyword only' : 'Embeddings idle'}
+            </span>
           </div>
         </div>
       )}
@@ -475,7 +581,7 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
               <span className="w-1 h-1 bg-neutral-300 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
               <span className="w-1 h-1 bg-neutral-300 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
             </div>
-            {searchingPapers ? 'Searching...' : 'Thinking...'}
+            {searchingExternal ? 'Searching external sources...' : searchingPapers ? 'Searching...' : 'Thinking...'}
           </div>
         )}
 
